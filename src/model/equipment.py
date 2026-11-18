@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, SmallInteger, DateTime, ForeignKey
+from sqlalchemy import Column, String, SmallInteger, DateTime, ForeignKey, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -7,6 +7,8 @@ from uuid6 import uuid7
 from src.config.db import Base
 # Se importa para que "VendorModel" quede registrado antes de resolver la relacion.
 from src.model.vendor import VendorModel  # noqa: F401
+# Para resolver las relaciones de la reserva con proyecto y usuario.
+from src.model.project import ProjectModel  # noqa: F401
 
 
 class StatusEquipamentModel(Base):
@@ -72,3 +74,38 @@ class EquipamentSupplierModel(Base):
     equipment = relationship("EquipmentModel", back_populates="units")
     vendor = relationship("VendorModel")
     status = relationship("StatusEquipamentModel", back_populates="units")
+    reservations = relationship("ReservationEquipamentModel", back_populates="equipament_supplier")
+
+
+class ReservationEquipamentModel(Base):
+    """Reserva de una unidad fisica de equipo para un proyecto en un rango de tiempo."""
+    __tablename__ = "reservation_equipament"
+    __table_args__ = (
+        CheckConstraint("end_date > reservation_date", name="ck_reservation_dates"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid7)
+    id_equipament_supplier = Column(
+        UUID(as_uuid=True),
+        ForeignKey("private.equipament_supplier.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    id_project = Column(
+        UUID(as_uuid=True),
+        ForeignKey('private."Project".id', ondelete="RESTRICT"),
+        nullable=False,
+    )
+    # Usuario que hizo la reserva
+    id_user = Column(
+        UUID(as_uuid=True),
+        ForeignKey("private.user.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    reservation_date = Column(DateTime(timezone=True), nullable=False)  # inicio
+    end_date = Column(DateTime(timezone=True), nullable=False)
+    purpose = Column(String(2000), nullable=True)
+    created_date = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    equipament_supplier = relationship("EquipamentSupplierModel", back_populates="reservations")
+    project = relationship("ProjectModel")
+    user = relationship("UserModel")

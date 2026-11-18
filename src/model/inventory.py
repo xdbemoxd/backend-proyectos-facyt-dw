@@ -7,6 +7,8 @@ from uuid6 import uuid7
 from src.config.db import Base
 # Se importa para que "VendorModel" quede registrado antes de resolver la relacion.
 from src.model.vendor import VendorModel  # noqa: F401
+# Para resolver las relaciones del despacho con proyecto y usuario.
+from src.model.project import ProjectModel  # noqa: F401
 
 
 class ResourceTypeModel(Base):
@@ -86,6 +88,7 @@ class RawMaterialSupplierModel(Base):
     raw_material = relationship("RawMaterialModel", back_populates="suppliers")
     vendor = relationship("VendorModel")
     lots = relationship("AudithRawMaterialSupplierModel", back_populates="raw_material_supplier")
+    dispatches = relationship("DispatchLogModel", back_populates="raw_material_supplier")
 
     @property
     def is_below_minimum(self) -> bool:
@@ -120,3 +123,39 @@ class AudithRawMaterialSupplierModel(Base):
     def total_cost(self):
         """Costo total del lote (cantidad x costo unitario)."""
         return self.count_raw_materials_in * self.unit_cost
+
+
+class DispatchLogModel(Base):
+    """Bitacora de despachos (salidas de almacen) hacia un proyecto. INSERT-only.
+    Cada registro resta `use_raw_materials` del `current_stock` del proveedor."""
+    # En el SQL esta sin comillas (private.Dispatch_log), asi que Postgres
+    # la guarda en minusculas: dispatch_log.
+    __tablename__ = "dispatch_log"
+    __table_args__ = (
+        CheckConstraint("use_raw_materials > 0.00", name="ck_dispatch_quantity_positive"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid7)
+    id_raw_materials_suppliers = Column(
+        UUID(as_uuid=True),
+        ForeignKey("private.raw_material_supplier.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    id_project = Column(
+        UUID(as_uuid=True),
+        ForeignKey('private."Project".id', ondelete="RESTRICT"),
+        nullable=False,
+    )
+    # Usuario responsable del retiro
+    id_user = Column(
+        UUID(as_uuid=True),
+        ForeignKey("private.user.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    use_raw_materials = Column(Numeric(14, 2), nullable=False)
+    material_requested_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    notes = Column(String(1000), nullable=True)
+
+    raw_material_supplier = relationship("RawMaterialSupplierModel", back_populates="dispatches")
+    project = relationship("ProjectModel")
+    user = relationship("UserModel")
