@@ -24,6 +24,6 @@ async def health_check(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         # Return 500 if the connection fails
         raise HTTPException(
-            status_code=500, 
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
             detail=f"Database connection failed: {str(e)}"
         )
