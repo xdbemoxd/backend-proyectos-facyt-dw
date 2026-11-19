@@ -3,6 +3,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from uuid6 import uuid7
+from typing import cast
 
 from src.config.db import Base
 # Se importa para que "VendorModel" quede registrado antes de resolver la relacion.
@@ -93,7 +94,7 @@ class RawMaterialSupplierModel(Base):
     @property
     def is_below_minimum(self) -> bool:
         """True si hay que lanzar la alerta de stock minimo."""
-        return self.current_stock <= self.minimun_stock
+        return cast(bool, self.current_stock <= self.minimun_stock)
 
 
 class AudithRawMaterialSupplierModel(Base):

@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+from typing import cast
 from dotenv import load_dotenv
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -42,9 +43,9 @@ async def _get_user_by_email(email: str, db: AsyncSession) -> UserModel | None:
 async def complete_user_profile(user: UserModel, name: str, lastname: str, db: AsyncSession) -> UserModel:
     """Completa nombre/apellido y activa la cuenta en el primer login con Google."""
     try:
-        user.name = name or None
-        user.lastname = lastname or None
-        user.is_active = True
+        user.name = name or None # type: ignore
+        user.lastname = lastname or None # type: ignore
+        user.is_active = True # type: ignore
         await db.commit()
         await db.refresh(user)
         return user
@@ -88,13 +89,13 @@ async def verify_auth_google(token: str, db: AsyncSession) -> dict:
             (idinfo.get("family_name") or "").strip(),
             db,
         )
-    elif not user.is_active:
+    elif not cast(bool, user.is_active):
         # Cuenta ya completada pero desactivada por un admin
         logger.info(f"Cuenta inactiva: {user.id}")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Error")
 
     rol_name = user.rol.name if user.rol else None
-    access_token = generate_jwt_to_frontend(user.id, user.email, rol_name)
+    access_token = generate_jwt_to_frontend(user.id, user.email, rol_name) # type: ignore
 
     return {
         "id": str(user.id),

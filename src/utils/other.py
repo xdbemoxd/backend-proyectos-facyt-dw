@@ -7,6 +7,17 @@ from dotenv import load_dotenv
 from jose import jwt,  ExpiredSignatureError, JWTError
 from fastapi import HTTPException, status
 
+load_dotenv()
+
+#JWT data
+SECRET_KEY: str = os.environ["SECRET_KEY"]
+
+if not SECRET_KEY:
+    raise RuntimeError("La variable de entorno SECRET_KEY no está configurada")
+
+ALGORITHM = "HS256"
+
+
 logger = logging.getLogger(__name__)
 
 def encode( string : str ):
@@ -31,48 +42,27 @@ def get_n_caracter( text: str, n: int ) -> str:
    
     return text[:n]
 
-def generate_jwt_to_frontend( id: uuid.UUID, email : str, rol : str | None ):
-
-    load_dotenv()
-
-    #JWT data
-    SECRET_KEY = os.getenv( "SECRET_KEY" ) 
-    ALGORITHM = "HS256"
-
-    expire = datetime.now(timezone.utc) + timedelta( hours = 8 );
+def generate_jwt_to_frontend(id: uuid.UUID, email: str, rol: str | None) -> str:
     
-    to_encode = { "sub": str(id), "email": email, "rol": rol, "exp": expire };
+    expire = datetime.now(timezone.utc) + timedelta(hours=8)
     
-    encoded_jwt = jwt.encode( to_encode, SECRET_KEY, algorithm = ALGORITHM );
+    to_encode = {"sub": str(id), "email": email, "rol": rol, "exp": expire}
     
-    return encoded_jwt
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def verify_token_acces( token : str ):
 
-    load_dotenv()
-
+def verify_token_acces(token: str) -> dict:
     try:
-        payload = jwt.decode(
-            token, 
-            os.getenv("SECRET_KEY"), 
-            algorithms=["HS256"]
-        )
-        return payload
-
+        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except ExpiredSignatureError as e:
-
         logger.error(f"ExpiredSignatureError: {e}")
-       
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Error"
+            detail="Error",
         )
-    
     except JWTError as e:
-
         logger.error(f"JWTError: {e}")
-        
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Error"
+            detail="Error",
         )
