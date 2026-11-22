@@ -3,34 +3,25 @@ import os
 
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.exception_handlers import (
     http_exception_handler as default_http_exception_handler,
-    request_validation_exception_handler as default_validation_exception_handler,
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from slowapi.util import get_remote_address
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from src.config.rate_limit import limiter
 from src.middleware.audit import AuditMiddleware
+from src.router.audit import router_audit
 from src.router.health import router_health
 from src.router.user import router_users
 
 load_dotenv()
-
-# ---------------------------------------------------------------------------
-# Rate limiting
-# ---------------------------------------------------------------------------
-limits_string = os.getenv("RATE_LIMIT", "100/minute")
-limits_list = [limit.strip() for limit in limits_string.split(",") if limit.strip()]
-if not limits_list:
-    limits_list = ["100/minute"]
-
-limiter = Limiter(key_func=get_remote_address, default_limits=limits_list)
 
 environment = os.getenv("ENVIRONMENT", "development")
 is_production = environment.lower() == "production"
@@ -91,7 +82,8 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    # No guardar `input`: puede contener passwords o tokens.
+    # Solo `loc`, `msg` y `type`: ni `input` ni `ctx` (pueden contener tokens,
+    # passwords o valores reflejados). SEC-211.
     safe_errors = [
         {
             "loc": list(error.get("loc", [])),
@@ -103,13 +95,17 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     request.state.error_detail = json.dumps(
         safe_errors, ensure_ascii=False, default=str
     )[:1000]
-    return await default_validation_exception_handler(request, exc)
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content={"detail": safe_errors},
+    )
 
 
 # ---------------------------------------------------------------------------
 # Rutas
 # ---------------------------------------------------------------------------
 app.include_router(router_users, prefix="/api", tags=["users"])
+app.include_router(router_audit, prefix="/api", tags=["audit"])
 app.include_router(router_health, prefix="", tags=["system"])
 
 

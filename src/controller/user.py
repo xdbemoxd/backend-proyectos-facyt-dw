@@ -41,17 +41,26 @@ async def _get_user_by_email(email: str, db: AsyncSession) -> UserModel | None:
 
 
 async def complete_user_profile(user: UserModel, name: str, lastname: str, db: AsyncSession) -> UserModel:
-    """Completa nombre/apellido y activa la cuenta en el primer login con Google."""
+    """Completa nombre/apellido en el primer login.
+
+    No activa la cuenta: la activacion/desactivacion es una decision del
+    administrador y no debe revertirse con un login.
+    """
     try:
         user.name = name or None # type: ignore
         user.lastname = lastname or None # type: ignore
-        user.is_active = True # type: ignore
         await db.commit()
         await db.refresh(user)
         return user
     except Exception as e:
         await db.rollback()
-        logger.error(f"Exception: {e}")
+        # Error interno: se registra el traceback solo en logs, nunca en la
+        # respuesta. Sin volcar el mensaje del driver al cliente.
+        logger.error(
+            "Error completando perfil de usuario (%s)",
+            type(e).__name__,
+            exc_info=True,
+        )
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error")
 
 
@@ -64,7 +73,8 @@ async def verify_auth_google(
             id_token.verify_oauth2_token, token, _google_request, GOOGLE_CLIENT_ID
         )
     except ValueError as e:
-        logger.warning(f"id_token invalido: {e}")
+        # No se registra el token ni el mensaje del verificador.
+        logger.warning("id_token invalido (%s)", type(e).__name__)
         raise _unauthorized()
 
     # 2. Claims obligatorios
@@ -74,7 +84,7 @@ async def verify_auth_google(
         raise _unauthorized()
 
     if GOOGLE_ALLOWED_DOMAIN and idinfo.get("hd") != GOOGLE_ALLOWED_DOMAIN:
-        logger.warning(f"Dominio no permitido: {idinfo.get('hd')}")
+        logger.warning("Dominio de Google no permitido")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Error")
 
     # 3. Solo usuarios pre-registrados por un administrador
@@ -83,7 +93,12 @@ async def verify_auth_google(
         logger.info("Login Google con email no registrado")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Error")
 
-    # 4. Primer login: completar perfil con los datos de Google y activar
+    # 4. Una cuenta desactivada no puede entrar, ni siquiera en el primer login.
+    if not cast(bool, user.is_active):
+        logger.info("Cuenta inactiva: %s", user.id)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Error")
+
+    # 5. Primer login: completar perfil con los datos de Google (sin activar).
     if user.name is None or user.lastname is None:
         user = await complete_user_profile(
             user,
@@ -91,10 +106,6 @@ async def verify_auth_google(
             (idinfo.get("family_name") or "").strip(),
             db,
         )
-    elif not cast(bool, user.is_active):
-        # Cuenta ya completada pero desactivada por un admin
-        logger.info(f"Cuenta inactiva: {user.id}")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Error")
 
     rol_name = user.rol.name if user.rol else None
     access_token = generate_jwt_to_frontend(user.id, user.email, rol_name) # type: ignore

@@ -48,13 +48,22 @@
 - Estado: **Aceptado con observación**
 - Detalle: el campo es interno y está acotado a 1000 caracteres. No debe exponerse por API sin RBAC. Evitar volcar SQL/parámetros sensibles en excepciones.
 
-### SEC-008 — Crecimiento indefinido de la tabla
+### SEC-008 — Email (PII) duplicado en auditoría
+- Severidad: Media
+- Ubicación: `after_data` / `user_email`
+- Estado: **Corregido para nuevos registros**
+- Detalle: los nuevos eventos guardan solo `user_id`, `entity_id`, `id_rol`,
+  `is_active` y `rol`. El email se resuelve desde `private."user"`. La fila
+  histórica de bootstrap se conserva por inmutabilidad y aún contiene el email
+  en su snapshot.
+
+### SEC-009 — Crecimiento indefinido de la tabla
 - Severidad: Media
 - Ubicación: `private.audit_log`
 - Estado: **Pendiente**
 - Detalle: definir retención/particionado antes de producción.
 
-### SEC-009 — La app usa el rol propietario de la BD
+### SEC-010 — La app usa el rol propietario de la BD
 - Severidad: Media
 - Ubicación: `DATABASE_URL`
 - Estado: **Pendiente**

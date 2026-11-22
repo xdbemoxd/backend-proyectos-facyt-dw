@@ -10,7 +10,7 @@ Bitácora **append-only** de acciones de negocio y requests HTTP.
 | `timestamp` | `timestamptz` | Fecha/hora del evento |
 | `request_id` | `uuid` | Correlaciona la request con eventos de negocio |
 | `user_id` | `uuid` | Actor (FK a `private.user`, `ON DELETE RESTRICT`) |
-| `user_email` | `varchar(255)` | Snapshot del email del actor |
+| `user_email` | `varchar(255)` | Legado histórico; los nuevos registros lo dejan `NULL` |
 | `ip_address` | `varchar(255)` | IP del cliente |
 | `method` | `varchar(10)` | Método HTTP |
 | `path` | `varchar(500)` | Endpoint solicitado |
@@ -39,6 +39,10 @@ Bitácora **append-only** de acciones de negocio y requests HTTP.
   similares: se registran como `[REDACTED]`.
 - En errores de validación (`422`) no se guarda el `input`, solo `loc`, `msg` y
   `type`.
+- **Minimización de PII:** los nuevos eventos no guardan el email del actor ni
+  en `user_email` ni en los snapshots. El email se resuelve desde
+  `private."user"` usando `user_id`/`entity_id`. Solo se conserva el email en
+  filas históricas anteriores a esta política.
 
 ## Migración
 
@@ -91,7 +95,6 @@ await record_audit(
     action="update_priority",
     entity_id=project.id,
     user_id=current_user.id,
-    user_email=current_user.email,
     request=request,
     before={"priority": "Media"},
     after={"priority": "Alta"},
@@ -108,7 +111,6 @@ await record_audit_standalone(
     action="update_priority_denied",
     entity_id=project.id,
     user_id=current_user.id,
-    user_email=current_user.email,
     outcome="denied",
     request=request,
 )

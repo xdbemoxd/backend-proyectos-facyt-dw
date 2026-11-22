@@ -1,5 +1,6 @@
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote, urlsplit
 
 import asyncpg
@@ -12,37 +13,24 @@ from app import app
 from src.config.db import AsyncSessionLocal
 from src.middleware.audit import AuditMiddleware
 from src.model.audit import AuditLogModel
-from src.model.user import RolModel, UserModel
 from src.utils.audit import record_audit, record_audit_standalone
 from src.utils.other import generate_jwt_to_frontend
 
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
-        os.getenv("RUN_AUDIT_INTEGRATION", "false").lower()
-        not in ("1", "true", "yes"),
-        reason="Definir RUN_AUDIT_INTEGRATION=1 para probar contra la BD real",
+        not os.getenv("TEST_DATABASE_URL", "").strip(),
+        reason="Definir TEST_DATABASE_URL (BD de pruebas aislada) para integración",
     ),
 ]
-
-
-async def get_admin() -> UserModel | None:
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(UserModel)
-            .join(RolModel, UserModel.id_rol == RolModel.id)
-            .where(RolModel.name == "Administrador del Sistema")
-            .order_by(UserModel.create_at.asc())
-            .limit(1)
-        )
-        return result.scalar_one_or_none()
 
 
 async def get_audit(request_id: str) -> AuditLogModel | None:
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(AuditLogModel).where(
-                AuditLogModel.request_id == uuid.UUID(request_id)
+                AuditLogModel.request_id == uuid.UUID(request_id),
+                AuditLogModel.entity == "HTTP",
             )
         )
         return result.scalar_one_or_none()
@@ -63,10 +51,10 @@ def pg_dsn() -> dict:
 
 
 @pytest.mark.asyncio
-async def test_http_audit_success_with_actor_and_redacted_headers(monkeypatch):
+async def test_http_audit_success_with_actor_and_redacted_headers(
+    monkeypatch, admin
+):
     monkeypatch.setenv("AUDIT_HTTP_ALL", "true")
-    admin = await get_admin()
-    assert admin is not None, "No existe el usuario admin de prueba"
 
     token = generate_jwt_to_frontend(
         admin.id, admin.email, "Administrador del Sistema"
@@ -92,7 +80,7 @@ async def test_http_audit_success_with_actor_and_redacted_headers(monkeypatch):
     assert row is not None
 
     assert row.user_id == admin.id
-    assert row.user_email == admin.email
+    assert row.user_email is None
     assert row.method == "GET"
     assert row.path == "/"
     assert row.status_code == 200
@@ -163,17 +151,14 @@ async def test_validation_error_does_not_store_input():
 
 @pytest.mark.asyncio
 async def test_business_audit_event_with_before_and_after():
-    admin = await get_admin()
-    assert admin is not None
-
+    # Evento de prueba: entity="Test" y sin actor real (SEC-203).
     async with AsyncSessionLocal() as db:
         entry = await record_audit(
             db,
-            entity="Project",
+            entity="Test",
             action="test_business_event",
-            entity_id="project-test",
-            user_id=admin.id,
-            user_email=admin.email,
+            entity_id="test-entity",
+            user_id=None,
             ip_address="127.0.0.1",
             before={"progress": 0, "priority": "Media"},
             after={"progress": 10, "priority": "Alta"},
@@ -187,7 +172,8 @@ async def test_business_audit_event_with_before_and_after():
         )
         row = result.scalar_one()
 
-    assert row.entity == "Project"
+    assert row.entity == "Test"
+    assert row.user_id is None
     assert row.action == "test_business_event"
     assert row.before_data == {"progress": 0, "priority": "Media"}
     assert row.after_data == {"progress": 10, "priority": "Alta"}
@@ -199,9 +185,10 @@ async def test_record_audit_standalone_commits_its_own_transaction():
     action = f"test_standalone_{uuid.uuid4().hex}"
 
     await record_audit_standalone(
-        entity="Project",
+        entity="Test",
         action=action,
-        entity_id="project-test",
+        entity_id="test-entity",
+        user_id=None,
         ip_address="127.0.0.1",
         after={"ok": True},
     )
@@ -212,7 +199,7 @@ async def test_record_audit_standalone_commits_its_own_transaction():
         )
         row = result.scalar_one()
 
-    assert row.entity == "Project"
+    assert row.entity == "Test"
     assert row.after_data == {"ok": True}
     assert row.outcome == "success"
 
@@ -274,21 +261,24 @@ async def test_middleware_audits_unhandled_exception():
 
 
 @pytest.mark.asyncio
-async def test_user_delete_is_blocked_by_audit_fk():
-    admin = await get_admin()
-    assert admin is not None
+async def test_user_delete_is_blocked_by_audit_fk(admin):
+    # Se crea un evento de prueba que referencia al admin de prueba, sin
+    # atribuir la accion a un administrador real (SEC-203).
+    async with AsyncSessionLocal() as db:
+        await record_audit(
+            db,
+            entity="Test",
+            action="test_delete_fk",
+            entity_id=str(admin.id),
+            user_id=admin.id,
+            ip_address="127.0.0.1",
+        )
+        await db.commit()
 
     conn = await asyncpg.connect(
         **pg_dsn(), timeout=30, statement_cache_size=0
     )
     try:
-        count = await conn.fetchval(
-            "select count(*) from private.audit_log where user_id = $1",
-            admin.id,
-        )
-        if not count:
-            pytest.skip("El admin no tiene filas de auditoría")
-
         transaction = conn.transaction()
         await transaction.start()
         with pytest.raises(asyncpg.PostgresError):
@@ -323,3 +313,51 @@ async def test_audit_log_blocks_update_and_delete():
             await transaction.rollback()
     finally:
         await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_audit_endpoint_filters_and_pagination_validation(admin):
+    token = generate_jwt_to_frontend(
+        admin.id, admin.email, "Administrador del Sistema"
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    now = datetime.now(timezone.utc)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        response = await client.get(
+            "/api/audit",
+            headers=headers,
+            params={
+                "entity": "HTTP",
+                "action": "http_request",
+                "outcome": "success",
+                "status_code": 200,
+                "user_id": str(admin.id),
+                # UUID aleatorio: no debe coincidir con ninguna fila.
+                "request_id": str(uuid.uuid4()),
+                "path": "/",
+                "from_date": (now - timedelta(days=1)).isoformat(),
+                "to_date": (now + timedelta(days=1)).isoformat(),
+                "limit": 1,
+                "offset": 0,
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["total"] == 0
+        assert body["limit"] == 1
+        assert body["offset"] == 0
+
+        for params in (
+            {"limit": 0},
+            {"limit": 201},
+            {"offset": -1},
+            {"status_code": 99},
+        ):
+            invalid = await client.get(
+                "/api/audit", headers=headers, params=params
+            )
+            assert invalid.status_code == 422, params

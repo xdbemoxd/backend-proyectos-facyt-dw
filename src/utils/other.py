@@ -55,13 +55,13 @@ def verify_token_acces(token: str) -> dict:
     try:
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except ExpiredSignatureError as e:
-        logger.error(f"ExpiredSignatureError: {e}")
+        logger.error("Token expirado (%s)", type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Error",
         )
     except JWTError as e:
-        logger.error(f"JWTError: {e}")
+        logger.error("JWT invalido (%s)", type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Error",

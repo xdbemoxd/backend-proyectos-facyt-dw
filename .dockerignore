@@ -1,0 +1,42 @@
+# Secretos y configuración local
+.env
+.env.*
+!.env.example
+
+# Control de versiones
+.git
+.gitignore
+.gitmodules
+
+# Entornos virtuales y cachés de Python
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+.coverage.*
+htmlcov
+
+# Pruebas y documentación (no se necesitan en runtime)
+tests
+docs
+*.md
+
+# Frontend (repositorio separado)
+frontend-proyectos-facyt
+
+# IDE / sistema operativo
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Artefactos locales
+*.log
+tmp
+temp

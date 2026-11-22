@@ -209,7 +209,7 @@ async def test_record_audit_uses_request_context():
 
     entry = await record_audit(
         session,
-        entity="Project",
+        entity="Test",
         action="update_priority",
         entity_id="1",
         before={"priority": "Media"},
@@ -219,7 +219,7 @@ async def test_record_audit_uses_request_context():
 
     assert entry is session.entry
     assert entry.user_id == user_id
-    assert entry.user_email == "a@b.com"
+    assert entry.user_email is None
     assert entry.request_id == request_id
     assert entry.ip_address == "1.2.3.4"
     assert entry.before_data == {"priority": "Media"}
@@ -235,12 +235,12 @@ async def test_record_audit_uses_token_when_state_is_empty():
 
     entry = await record_audit(
         session,
-        entity="Project",
+        entity="Test",
         action="token_actor",
         entity_id="1",
         request=request,
     )
 
     assert entry.user_id == user_id
-    assert entry.user_email == "token@b.com"
+    assert entry.user_email is None
     assert entry.ip_address == "1.2.3.4"

@@ -83,7 +83,8 @@ class AuditLogModel(Base):
         ForeignKey("private.user.id", ondelete="RESTRICT"),
         nullable=True,
     )
-    # Snapshot del actor para que la auditoria siga siendo legible.
+    # Campo historico. Los nuevos registros lo dejan NULL: el email se
+    # resuelve desde private."user" usando user_id/entity_id.
     user_email = Column(String(255), nullable=True)
 
     ip_address = Column(String(255), nullable=False)

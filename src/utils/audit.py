@@ -212,6 +212,9 @@ def should_audit_request(method: str, path: str, status_code: int) -> bool:
     """
     if path in _EXCLUDED_PATHS:
         return False
+    # Leer la auditoria tambien es una accion sensible.
+    if path.startswith("/api/audit"):
+        return True
     if method.upper() not in {"GET", "HEAD", "OPTIONS"}:
         return True
     if path.startswith("/api/user/auth/"):
@@ -231,7 +234,7 @@ def build_http_audit_data(
 ) -> dict[str, Any]:
     """Construye el diccionario para una fila de auditoria HTTP."""
     request_id = getattr(request.state, "request_id", None) or uuid.uuid4()
-    user_id, user_email = extract_actor(request)
+    user_id, _ = extract_actor(request)
     outcome = outcome_from_status(status_code)
 
     if error_detail is None:
@@ -242,7 +245,8 @@ def build_http_audit_data(
     return {
         "request_id": request_id,
         "user_id": user_id,
-        "user_email": user_email,
+        # PII fuera de auditoria: el email se resuelve desde private."user".
+        "user_email": None,
         "ip_address": get_client_ip(request),
         "method": request.method.upper(),
         "path": _truncate(request.url.path, 500),
@@ -282,7 +286,6 @@ async def record_audit(
     action: str,
     entity_id: str | uuid.UUID | None = None,
     user_id: uuid.UUID | None = None,
-    user_email: str | None = None,
     ip_address: str = "unknown",
     outcome: str = "success",
     before: Any = None,
@@ -293,8 +296,7 @@ async def record_audit(
     """Agrega un evento de negocio a la transaccion actual (sin commit)."""
     if request is not None:
         if user_id is None:
-            user_id, state_email = _actor_from_state_or_token(request)
-            user_email = user_email or state_email
+            user_id, _ = _actor_from_state_or_token(request)
         if ip_address == "unknown":
             ip_address = get_client_ip(request)
         if request_id is None:
@@ -303,7 +305,8 @@ async def record_audit(
     entry = AuditLogModel(
         request_id=request_id,
         user_id=_to_uuid(user_id),
-        user_email=_truncate(user_email, 255),
+        # PII fuera de auditoria: el email se resuelve desde private."user".
+        user_email=None,
         ip_address=_truncate(ip_address, 255) or "unknown",
         entity=_truncate(entity, 255) or "Unknown",
         action=_truncate(action, 255) or "unknown",
