@@ -3,7 +3,7 @@ import asyncio
 import logging
 from typing import cast
 from dotenv import load_dotenv
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,7 +55,9 @@ async def complete_user_profile(user: UserModel, name: str, lastname: str, db: A
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error")
 
 
-async def verify_auth_google(token: str, db: AsyncSession) -> dict:
+async def verify_auth_google(
+    token: str, db: AsyncSession, request: Request | None = None
+) -> dict:
     # 1. Verificar firma, exp, iss y aud del id_token (llamada bloqueante -> hilo aparte)
     try:
         idinfo = await asyncio.to_thread(
@@ -96,6 +98,12 @@ async def verify_auth_google(token: str, db: AsyncSession) -> dict:
 
     rol_name = user.rol.name if user.rol else None
     access_token = generate_jwt_to_frontend(user.id, user.email, rol_name) # type: ignore
+
+    # Deja el actor autenticado disponible para el middleware de auditoria.
+    if request is not None:
+        request.state.user_id = str(user.id)
+        request.state.user_email = user.email
+        request.state.user_role = rol_name
 
     return {
         "id": str(user.id),

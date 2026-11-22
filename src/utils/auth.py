@@ -1,7 +1,7 @@
 import os
 import secrets
 from dotenv import load_dotenv
-from fastapi import Depends, HTTPException, status, Header
+from fastapi import Depends, HTTPException, Request, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from src.utils.other import verify_token_acces
 import string
@@ -9,7 +9,10 @@ import string
 # Inicializamos el "guardia de seguridad" de FastAPI
 security = HTTPBearer()
 
-async def verify_token_access_top( credentials: HTTPAuthorizationCredentials = Depends( security ) ):
+async def verify_token_access_top(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends( security ),
+):
 
     token_limpio = credentials.credentials
     
@@ -20,6 +23,11 @@ async def verify_token_access_top( credentials: HTTPAuthorizationCredentials = D
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Error"
         )
+
+    # Deja el actor disponible para el middleware de auditoria.
+    request.state.user_id = payload.get("sub")
+    request.state.user_email = payload.get("email")
+    request.state.user_role = payload.get("rol")
     
     return payload
 
