@@ -17,6 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.config.rate_limit import limiter
 from src.middleware.audit import AuditMiddleware
+from src.middleware.security_headers import SecurityHeadersMiddleware
 from src.router.audit import router_audit
 from src.router.health import router_health
 from src.router.user import router_users
@@ -25,6 +26,10 @@ load_dotenv()
 
 environment = os.getenv("ENVIRONMENT", "development")
 is_production = environment.lower() == "production"
+docs_enabled = (
+    not is_production
+    and os.getenv("ENABLE_DOCS", "false").lower() in ("1", "true", "yes")
+)
 
 # ---------------------------------------------------------------------------
 # Aplicacion
@@ -32,9 +37,9 @@ is_production = environment.lower() == "production"
 app = FastAPI(
     title="Sistema de Control de Proyectos y Recursos",
     version="0.1.0",
-    docs_url=None if is_production else "/docs",
-    redoc_url=None if is_production else "/redoc",
-    openapi_url=None if is_production else "/openapi.json",
+    docs_url="/docs" if docs_enabled else None,
+    redoc_url="/redoc" if docs_enabled else None,
+    openapi_url="/openapi.json" if docs_enabled else None,
 )
 
 app.state.limiter = limiter
@@ -42,6 +47,7 @@ app.state.limiter = limiter
 # El orden importa: el ultimo middleware agregado queda mas afuera.
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(AuditMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 # ---------------------------------------------------------------------------
 # CORS

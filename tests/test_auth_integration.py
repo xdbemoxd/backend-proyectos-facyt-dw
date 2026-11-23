@@ -237,7 +237,28 @@ async def test_inactive_user_token_is_rejected(client, admin_token):
 
     response = await client.get("/api/user/me", headers=auth(token))
 
-    assert response.status_code == 403
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_revokes_backend_token(client, admin_token):
+    coordinator = await create_user(client, admin_token, COORDINATOR_ROLE)
+    token = token_for(coordinator)
+    try:
+        assert (
+            await client.get("/api/user/me", headers=auth(token))
+        ).status_code == 200
+
+        response = await client.post(
+            "/api/user/auth/logout", headers=auth(token)
+        )
+        assert response.status_code == 200
+
+        assert (
+            await client.get("/api/user/me", headers=auth(token))
+        ).status_code == 401
+    finally:
+        await deactivate(client, admin_token, coordinator["id"])
 
 
 @pytest.mark.asyncio

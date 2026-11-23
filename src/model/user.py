@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -37,6 +37,12 @@ class UserModel(Base):
     
     # is_active ahora es False por defecto, tal como en tu SQL
     is_active = Column(Boolean, default=False)
+
+    # Version de token: se incrementa al cerrar sesion o cambiar rol/estado.
+    # Un JWT con una version distinta deja de ser valido inmediatamente.
+    token_version = Column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     
     # Clave foránea apuntando a la tabla rol dentro del esquema private
     id_rol = Column(

@@ -15,6 +15,7 @@ from src.schema.user import (
     UserOut,
     UserUpdate,
 )
+from src.service import auth as auth_service
 from src.service import user as user_service
 from src.utils.auth import get_current_user, require_roles
 from src.utils.roles import ADMIN_ROLE
@@ -32,6 +33,15 @@ async def login_con_google(
     # Las HTTPException (401/403/500) del controller suben tal cual;
     # cualquier otro error lo maneja FastAPI como 500.
     return await verify_auth_google(payload.id_token, db, request)
+
+
+@router_users.post("/user/auth/logout")
+async def logout(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await auth_service.logout(db, current_user, request)
 
 
 @router_users.get("/user/me", response_model=UserOut)

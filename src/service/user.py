@@ -431,6 +431,11 @@ async def update_user(
                 detail="No se puede dejar el sistema sin administradores activos",
             )
 
+    role_changed = new_role is not None and new_role.id != user.id_rol
+    if role_changed or "is_active" in updates:
+        # Invalida JWTs previos del usuario.
+        user.token_version = int(getattr(user, "token_version", 0) or 0) + 1
+
     if "name" in updates:
         user.name = updates["name"]
     if "lastname" in updates:

@@ -71,8 +71,15 @@ async def get_current_user(
 
     if user is None:
         raise _unauthorized()
+    try:
+        token_version = int(payload.get("ver", -1))
+    except (TypeError, ValueError):
+        raise _unauthorized()
+    if token_version != int(getattr(user, "token_version", 0) or 0):
+        raise _unauthorized()
     if not bool(user.is_active):
-        raise _forbidden()
+        # No revelar si el token corresponde a una cuenta desactivada.
+        raise _unauthorized()
     if user.rol is None or user.rol.name not in ALLOWED_ROLES:
         raise _forbidden()
 

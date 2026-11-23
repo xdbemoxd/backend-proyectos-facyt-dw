@@ -114,7 +114,12 @@ async def verify_auth_google(
         )
 
     rol_name = user.rol.name if user.rol else None
-    access_token = generate_jwt_to_frontend(user.id, user.email, rol_name) # type: ignore
+    access_token = generate_jwt_to_frontend(
+        user.id,
+        user.email,
+        rol_name,
+        int(getattr(user, "token_version", 0) or 0),
+    ) # type: ignore
 
     # Deja el actor autenticado disponible para el middleware de auditoria.
     if request is not None:

@@ -25,7 +25,7 @@ POST /api/user/auth/google/login   { "id_token": "..." }
   ├─ 4. Busca el email en private."user" (debe estar pre-registrado)
   ├─ 5. Rechaza cuentas inactivas
   ├─ 6. Primer login: completa name/lastname desde Google (no activa)
-  └─ 7. Emite JWT propio (8 h) y devuelve los datos del usuario
+  └─ 7. Emite JWT propio (60 min) y devuelve los datos del usuario
 ```
 
 ### Endpoint
@@ -76,9 +76,9 @@ El token se genera en `src/utils/other.py` con `python-jose`.
 |---|---|
 | Algoritmo | `HS256` |
 | Firma | `SECRET_KEY` |
-| Vigencia | 8 horas (`exp`) |
-| Claims | `sub` (UUID del usuario), `email`, `rol`, `exp` |
-| Verificación | Firma y `exp` con `verify_token_acces` |
+| Vigencia | 60 minutos (`JWT_ACCESS_TTL_MINUTES`) |
+| Claims | `sub`, `email`, `rol`, `iss`, `aud`, `iat`, `nbf`, `exp`, `jti`, `ver` |
+| Verificación | Firma, `exp`, `iss` y `aud` con `verify_token_acces` |
 
 La API espera el token en cada request autenticada:
 
@@ -95,12 +95,13 @@ Authorization: Bearer <JWT>
 
 Notas de diseño:
 
-- El JWT propio no incluye `iss` ni `aud`; esas validaciones sí se aplican al
-  `id_token` de Google.
-- No hay endpoint de logout ni lista de revocación de tokens. El logout es
-  descarte del token en el cliente. La desactivación de la cuenta es el
-  mecanismo efectivo para cortar el acceso.
-- No hay refresh token.
+- El JWT propio incluye `iss` (`JWT_ISSUER`) y `aud` (`JWT_AUDIENCE`), y ambos
+  se validan al verificar el token.
+- `POST /api/user/auth/logout` incrementa `private."user".token_version`; el
+  token viejo deja de ser válido inmediatamente. Lo mismo ocurre al cambiar el
+  rol o el estado de la cuenta.
+- No hay refresh token. La sesión de NextAuth y el token del backend duran
+  **60 minutos**; después se debe volver a iniciar sesión con Google.
 
 ## 2. Roles del sistema
 
@@ -132,6 +133,7 @@ Leyenda: ✅ permitido · ❌ `403` · 🔓 público · — no aplica.
 | Endpoint | Público | Administrador | Aprobador | Coordinador |
 |---|---:|---:|---:|---:|
 | `POST /api/user/auth/google/login` | 🔓 | — | — | — |
+| `POST /api/user/auth/logout` | ❌ | ✅ | ✅ | ✅ |
 | `GET /api/user/me` | ❌ | ✅ | ✅ | ✅ |
 | `GET /api/user/roles` | ❌ | ✅ | ❌ | ❌ |
 | `GET /api/user` | ❌ | ✅ | ❌ | ❌ |
@@ -145,7 +147,8 @@ Precisiones:
 
 - Sin token, o con token inválido/expirado, la respuesta es `401`.
 - Con token válido pero rol distinto al exigido, la respuesta es `403`.
-- Un usuario inactivo recibe `403` en cualquier endpoint autenticado.
+- Un usuario inactivo recibe `401` genérico en cualquier endpoint autenticado
+  (no se revela si la cuenta existe/está desactivada).
 - Los endpoints de negocio futuros deben declarar explícitamente
   `require_roles(...)`; no se debe asumir que “autenticado” equivale a
   “autorizado”.
@@ -202,12 +205,15 @@ async def get_me(
 Secuencia de validación:
 
 1. Exige el header `Authorization: Bearer <token>`. Sin header → `401`.
-2. Verifica firma y expiración del JWT. Token inválido o expirado → `401`.
+2. Verifica firma, expiración, `iss` y `aud` del JWT. Token inválido o
+   expirado → `401`.
 3. Exige que `sub` sea un UUID válido. Si no → `401`.
 4. Busca el usuario en la base de datos con su rol. Si no existe → `401`.
-5. Si `is_active` es falso → `403`.
-6. Si el rol no existe o no está en `ALLOWED_ROLES` → `403`.
-7. Devuelve un `CurrentUser` y deja `request.state.user_id`, `user_email` y
+5. Compara el claim `ver` con `private."user".token_version`; si difiere
+   (logout, cambio de rol o desactivación) → `401`.
+6. Si `is_active` es falso → `401`.
+7. Si el rol no existe o no está en `ALLOWED_ROLES` → `403`.
+8. Devuelve un `CurrentUser` y deja `request.state.user_id`, `user_email` y
    `user_role` disponibles para la auditoría.
 
 `CurrentUser` contiene: `id`, `email`, `name`, `lastname`, `is_active`,
@@ -343,7 +349,7 @@ históricas y la auditoría (`audit_log.user_id` usa `ON DELETE RESTRICT`).
 |---|---|---|
 | `401` | Falta el token, es inválido, está expirado o su `sub` no es un UUID | `GET /api/user/me` sin `Authorization` |
 | `401` | El `id_token` de Google es inválido o el email no está verificado | Login con token alterado |
-| `403` | Usuario autenticado pero inactivo | Token vigente de una cuenta desactivada |
+| `401` | Usuario autenticado pero inactivo o token revocado | Token de cuenta desactivada o con `ver` obsoleto |
 | `403` | El rol no permite el endpoint | Coordinador en `GET /api/user` |
 | `403` | Dominio de Google no permitido, email no registrado o cuenta inactiva | Login rechazado |
 | `404` | El usuario solicitado no existe | `GET /api/user/{uuid_inexistente}` |
@@ -370,14 +376,19 @@ en los logs internos; no se devuelve `str(e)` ni el detalle del motor.
 | `DATABASE_URL` | Sí | Conexión PostgreSQL async (`postgresql+asyncpg://...`) |
 | `SCHEMA` | Sí | Esquema de la base de datos; el proyecto usa `private` |
 | `SECRET_KEY` | Sí | Firma y verificación del JWT propio |
+| `JWT_ISSUER` | No | `iss` del JWT propio; default `proyectos-facyt-api` |
+| `JWT_AUDIENCE` | No | `aud` del JWT propio; default `proyectos-facyt-frontend` |
+| `JWT_ACCESS_TTL_MINUTES` | No | Vigencia del access token; default `60` |
 | `GOOGLE_CLIENT_ID` | Sí | Validación de firma, `iss` y `aud` del ID token de Google |
 | `GOOGLE_ALLOWED_DOMAIN` | No | Si se define, exige que el claim `hd` coincida (ej. `uc.edu.ve`) |
-| `ENVIRONMENT` | No | `development` (default) o `production`; en producción se desactivan `/docs`, `/redoc` y OpenAPI |
+| `ENVIRONMENT` | No | `development` (default) o `production` |
+| `ENABLE_DOCS` | No | `true` habilita `/docs`, `/redoc` y OpenAPI; default `false` |
 | `CORS_ORIGINS` | No | Orígenes permitidos, separados por coma. En desarrollo hay defaults locales |
 | `RATE_LIMIT` | No | Límite global de SlowAPI; default `100/minute`, admite lista separada por coma |
 | `LOGIN_RATE_LIMIT` | No | Límite específico del login; default `10/minute`. Se aplica además del global |
 | `TRUST_PROXY_HEADERS` | No | `true` solo detrás de un proxy confiable; habilita `X-Forwarded-For` / `X-Real-IP` |
 | `AUDIT_HTTP_ALL` | No | `true` para auditar también todos los GET exitosos |
+| `AUDIT_RETENTION_DAYS` | No | Días de retención operativa de auditoría; default `365` |
 | `TOKEN_CRON` | No | Token para tareas programadas; no interviene en el login de usuarios |
 
 `SECRET_KEY`, `GOOGLE_CLIENT_ID` y `DATABASE_URL` se validan al importar la
@@ -390,11 +401,16 @@ Ejemplo de `.env` (sin valores reales):
 DATABASE_URL=postgresql+asyncpg://usuario:password@host:5432/basedatos
 SCHEMA=private
 SECRET_KEY=<secreto-de-firma>
+JWT_ISSUER=proyectos-facyt-api
+JWT_AUDIENCE=proyectos-facyt-frontend
+JWT_ACCESS_TTL_MINUTES=60
 GOOGLE_CLIENT_ID=<client-id>.apps.googleusercontent.com
 GOOGLE_ALLOWED_DOMAIN=uc.edu.ve
 ENVIRONMENT=development
+ENABLE_DOCS=false
 RATE_LIMIT=100/minute
 LOGIN_RATE_LIMIT=10/minute
+AUDIT_RETENTION_DAYS=365
 ```
 
 ### Despliegue y secretos
@@ -408,6 +424,13 @@ LOGIN_RATE_LIMIT=10/minute
 - Si una imagen se publicó con un `.env` dentro, hay que rotar `SECRET_KEY`, la
   contraseña de la base de datos y `GOOGLE_CLIENT_SECRET`, y reconstruir la
   imagen.
+- Backend y frontend envían `X-Content-Type-Options`, `X-Frame-Options`,
+  `Referrer-Policy`, `Permissions-Policy` y CSP. `Strict-Transport-Security` y
+  las cookies `Secure` requieren HTTPS; en localhost HTTP no se emiten.
+- `ENABLE_DOCS=false` por defecto: Swagger/OpenAPI no se publican salvo que se
+  habilite explícitamente en desarrollo.
+- El owner de `audit_log` es `audit_owner`; el rol de aplicación solo tiene
+  `SELECT`/`INSERT` y no puede desactivar los triggers append-only.
 
 ## 9. PII y auditoría
 
