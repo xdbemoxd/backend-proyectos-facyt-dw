@@ -7,6 +7,7 @@ from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.model.audit import AuditLogModel
 from src.schema.audit import AuditLogOut, PaginatedAudit
@@ -47,13 +48,24 @@ async def list_audit(
     if to_date is not None:
         conditions.append(AuditLogModel.timestamp <= to_date)
 
-    base = select(AuditLogModel)
+    base = select(AuditLogModel).options(selectinload(AuditLogModel.user))
     count_stmt = select(func.count()).select_from(AuditLogModel)
+    counts_stmt = select(
+        AuditLogModel.outcome, func.count()
+    ).select_from(AuditLogModel)
     if conditions:
         base = base.where(*conditions)
         count_stmt = count_stmt.where(*conditions)
+        counts_stmt = counts_stmt.where(*conditions)
 
     total = int(await db.scalar(count_stmt) or 0)
+    counts_result = await db.execute(
+        counts_stmt.group_by(AuditLogModel.outcome)
+    )
+    counts = {"success": 0, "denied": 0, "failed": 0}
+    for outcome, count in counts_result.all():
+        counts[outcome] = int(count)
+
     result = await db.execute(
         base.order_by(AuditLogModel.timestamp.desc())
         .limit(limit)
@@ -68,4 +80,5 @@ async def list_audit(
         total=total,
         limit=limit,
         offset=offset,
+        counts=counts,
     )

@@ -5,6 +5,15 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 
+class AuditUserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    email: str
+    name: str | None = None
+    lastname: str | None = None
+
+
 class AuditLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -13,6 +22,7 @@ class AuditLogOut(BaseModel):
     request_id: UUID | None = None
     user_id: UUID | None = None
     user_email: str | None = None
+    user: AuditUserOut | None = None
     ip_address: str
     method: str | None = None
     path: str | None = None
@@ -36,3 +46,4 @@ class PaginatedAudit(BaseModel):
     total: int
     limit: int
     offset: int
+    counts: dict[str, int] = {}
