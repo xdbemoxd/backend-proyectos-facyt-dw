@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import time
 from typing import cast
 from dotenv import load_dotenv
 from fastapi import HTTPException, Request, status
@@ -67,6 +68,8 @@ async def complete_user_profile(user: UserModel, name: str, lastname: str, db: A
 async def verify_auth_google(
     token: str, db: AsyncSession, request: Request | None = None
 ) -> dict:
+    started = time.perf_counter()
+
     # 1. Verificar firma, exp, iss y aud del id_token (llamada bloqueante -> hilo aparte)
     try:
         idinfo = await asyncio.to_thread(
@@ -76,6 +79,8 @@ async def verify_auth_google(
         # No se registra el token ni el mensaje del verificador.
         logger.warning("id_token invalido (%s)", type(e).__name__)
         raise _unauthorized()
+
+    verified_at = time.perf_counter()
 
     # 2. Claims obligatorios
     email = idinfo.get("email")
@@ -89,6 +94,7 @@ async def verify_auth_google(
 
     # 3. Solo usuarios pre-registrados por un administrador
     user = await _get_user_by_email(email, db)
+    db_at = time.perf_counter()
     if user is None:
         logger.info("Login Google con email no registrado")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Error")
@@ -115,6 +121,13 @@ async def verify_auth_google(
         request.state.user_id = str(user.id)
         request.state.user_email = user.email
         request.state.user_role = rol_name
+
+    logger.info(
+        "Google login timing: verify=%.2fs db=%.2fs total=%.2fs",
+        verified_at - started,
+        db_at - verified_at,
+        time.perf_counter() - started,
+    )
 
     return {
         "id": str(user.id),
