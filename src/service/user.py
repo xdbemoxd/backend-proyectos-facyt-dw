@@ -36,6 +36,7 @@ def _user_out(user: UserModel, role_name: str | None) -> UserOut:
         is_active=bool(user.is_active),
         id_rol=user.id_rol,
         rol=role_name,
+        create_at=getattr(user, "create_at", None),
     )
 
 

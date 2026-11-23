@@ -84,6 +84,7 @@ async def get_current_user(
         is_active=bool(user.is_active),
         id_rol=user.id_rol,
         rol=user.rol.name,
+        create_at=getattr(user, "create_at", None),
     )
 
     # Disponible para el middleware de auditoria.

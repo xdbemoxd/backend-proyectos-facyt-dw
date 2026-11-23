@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -41,6 +42,7 @@ class UserOut(BaseModel):
     is_active: bool
     id_rol: UUID
     rol: str | None = None
+    create_at: datetime | None = None
 
 
 class CurrentUser(UserOut):
