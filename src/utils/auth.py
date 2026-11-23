@@ -119,6 +119,7 @@ def require_roles(*roles: str):
                 user_id=current_user.id,
                 request=request,
                 outcome="denied",
+                status_code=403,
                 after={
                     "reason": "role_not_allowed",
                     "role": current_user.rol,

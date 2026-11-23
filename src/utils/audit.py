@@ -288,12 +288,19 @@ async def record_audit(
     user_id: uuid.UUID | None = None,
     ip_address: str = "unknown",
     outcome: str = "success",
+    status_code: int | None = None,
     before: Any = None,
     after: Any = None,
     request: Request | None = None,
     request_id: uuid.UUID | None = None,
 ) -> AuditLogModel:
-    """Agrega un evento de negocio a la transaccion actual (sin commit)."""
+    """Agrega un evento de negocio a la transaccion actual (sin commit).
+
+    Si se pasa ``request``, el evento incluye la misma metadata HTTP que la
+    fila del middleware (metodo, endpoint, user-agent, headers y query params).
+    ``status_code`` debe indicar el resultado real de la operacion de negocio.
+    """
+    http_fields: dict[str, Any] = {}
     if request is not None:
         if user_id is None:
             user_id, _ = _actor_from_state_or_token(request)
@@ -302,12 +309,21 @@ async def record_audit(
         if request_id is None:
             request_id = getattr(request.state, "request_id", None)
 
+        http_fields = {
+            "method": request.method.upper(),
+            "path": _truncate(request.url.path, 500),
+            "user_agent": _truncate(request.headers.get("user-agent"), 512),
+            "request_headers": sanitize_headers(request.headers),
+            "query_params": sanitize_query_params(dict(request.query_params)),
+        }
+
     entry = AuditLogModel(
         request_id=request_id,
         user_id=_to_uuid(user_id),
         # PII fuera de auditoria: el email se resuelve desde private."user".
         user_email=None,
         ip_address=_truncate(ip_address, 255) or "unknown",
+        status_code=status_code,
         entity=_truncate(entity, 255) or "Unknown",
         action=_truncate(action, 255) or "unknown",
         entity_id=_truncate(entity_id, 100),
@@ -316,6 +332,7 @@ async def record_audit(
         error_detail=None,
         before_data=jsonable(before),
         after_data=jsonable(after),
+        **http_fields,
     )
     db.add(entry)
     await db.flush()

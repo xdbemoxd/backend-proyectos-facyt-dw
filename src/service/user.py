@@ -68,6 +68,7 @@ async def _audit_denial(
     actor: CurrentUser,
     request: Request | None,
     reason: str,
+    status_code: int,
     entity_id: str | uuid.UUID | None = None,
     extra: dict | None = None,
 ) -> None:
@@ -89,6 +90,7 @@ async def _audit_denial(
         user_id=actor.id,
         request=request,
         outcome="denied",
+        status_code=status_code,
         after=after,
     )
 
@@ -127,6 +129,7 @@ async def _get_role_or_422(
                 request=request,
                 entity_id=entity_id,
                 reason="invalid_role",
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 extra={"id_rol": str(role_id)},
             )
         raise HTTPException(
@@ -242,6 +245,7 @@ async def create_user(
             request=request,
             entity_id=existing.id,
             reason="duplicate_email",
+            status_code=status.HTTP_409_CONFLICT,
         )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -274,6 +278,7 @@ async def create_user(
             entity_id=user.id,
             user_id=actor.id,
             request=request,
+            status_code=status.HTTP_201_CREATED,
             after=_snapshot(user, role.name),
         )
         await db.commit()
@@ -287,6 +292,7 @@ async def create_user(
                 actor=actor,
                 request=request,
                 reason="duplicate_email",
+                status_code=status.HTTP_409_CONFLICT,
             )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -337,6 +343,7 @@ async def update_user(
                 request=request,
                 entity_id=target_id,
                 reason="null_field",
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 extra={"field": field},
             )
             raise HTTPException(
@@ -351,6 +358,7 @@ async def update_user(
             request=request,
             entity_id=target_id,
             reason="empty_update",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -381,6 +389,7 @@ async def update_user(
                 request=request,
                 entity_id=target_id,
                 reason="self_deactivation",
+                status_code=status.HTTP_409_CONFLICT,
             )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -393,6 +402,7 @@ async def update_user(
                 request=request,
                 entity_id=target_id,
                 reason="self_role_change",
+                status_code=status.HTTP_409_CONFLICT,
                 extra={"id_rol": str(new_role.id)},
             )
             raise HTTPException(
@@ -420,6 +430,7 @@ async def update_user(
                 request=request,
                 entity_id=target_id,
                 reason="last_admin",
+                status_code=status.HTTP_409_CONFLICT,
                 extra={
                     "active_admins": active_admins,
                     "new_is_active": bool(new_is_active),
@@ -452,6 +463,7 @@ async def update_user(
         entity_id=user.id,
         user_id=actor.id,
         request=request,
+        status_code=status.HTTP_200_OK,
         before=before,
         after=_snapshot(user, new_role_name),
     )

@@ -26,6 +26,7 @@ async def logout(
             user_id=user.id,
             request=request,
             outcome="success",
+            status_code=200,
         )
         await db.commit()
 
