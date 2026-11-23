@@ -7,7 +7,9 @@ la auditoria no debe tumbar la API.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 import time
 import uuid
 
@@ -21,6 +23,21 @@ from src.utils.audit import (
 )
 
 logger = logging.getLogger(__name__)
+_background_tasks: set[asyncio.Task] = set()
+
+
+async def _schedule_audit(data: dict) -> None:
+    """Escribe la auditoria sin bloquear la respuesta.
+
+    En tests se puede forzar escritura sincrona con AUDIT_SYNC_WRITES=true.
+    """
+    if os.getenv("AUDIT_SYNC_WRITES", "false").lower() in ("1", "true", "yes"):
+        await write_http_audit(data)
+        return
+
+    task = asyncio.create_task(write_http_audit(data))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 class AuditMiddleware(BaseHTTPMiddleware):
@@ -54,7 +71,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                         error_code=error_code,
                         error_detail=error_detail,
                     )
-                    await write_http_audit(data)
+                    await _schedule_audit(data)
                 except Exception as exc:  # pragma: no cover - defensivo
                     logger.error(
                         "Fallo construyendo auditoria HTTP: %s",

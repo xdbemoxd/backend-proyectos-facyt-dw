@@ -25,10 +25,17 @@ engine_kwargs = {
     "connect_args": connect_args,
 }
 
-# Con el pooler de Supabase (PgBouncer en modo transaccion) no conviene que
-# SQLAlchemy retenga conexiones: cada conexion queda atada a un event loop.
-if "pooler.supabase.com" in SQLALCHEMY_DATABASE_URL or ":6543" in SQLALCHEMY_DATABASE_URL:
+# Las pruebas usan NullPool para no atar conexiones a un event loop que se
+# cierra entre tests. La aplicacion reutiliza conexiones (pool) para evitar
+# el costo de abrir una conexion nueva en cada request contra Supabase.
+if os.getenv("TEST_DATABASE_URL"):
     engine_kwargs["poolclass"] = NullPool
+else:
+    engine_kwargs.update(
+        pool_size=5,
+        max_overflow=5,
+        pool_recycle=1800,
+    )
 
 engine = create_async_engine(SQLALCHEMY_DATABASE_URL, **engine_kwargs)
 

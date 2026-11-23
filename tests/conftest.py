@@ -24,6 +24,11 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
 
+# Las pruebas consultan audit_log inmediatamente despues del response.
+os.environ.setdefault("AUDIT_SYNC_WRITES", "true")
+# Limite deterministico para el test de fuerza bruta, independiente del .env.
+os.environ.setdefault("LOGIN_RATE_LIMIT", "10/minute")
+
 _TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "").strip()
 
 if _TEST_DATABASE_URL:

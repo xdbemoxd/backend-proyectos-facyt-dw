@@ -6,7 +6,7 @@ from typing import cast
 from dotenv import load_dotenv
 from fastapi import HTTPException, Request, status
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
@@ -34,7 +34,7 @@ def _unauthorized() -> HTTPException:
 async def _get_user_by_email(email: str, db: AsyncSession) -> UserModel | None:
     stmt = (
         select(UserModel)
-        .options(selectinload(UserModel.rol))  # evita lazy-load en async
+        .options(joinedload(UserModel.rol))  # evita lazy-load en async
         .where(UserModel.email == email)
     )
     result = await db.execute(stmt)

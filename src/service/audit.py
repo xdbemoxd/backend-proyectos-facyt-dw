@@ -5,9 +5,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload
 
 from src.model.audit import AuditLogModel
 from src.schema.audit import AuditLogOut, PaginatedAudit
@@ -48,35 +48,73 @@ async def list_audit(
     if to_date is not None:
         conditions.append(AuditLogModel.timestamp <= to_date)
 
-    base = select(AuditLogModel).options(selectinload(AuditLogModel.user))
-    count_stmt = select(func.count()).select_from(AuditLogModel)
-    counts_stmt = select(
-        AuditLogModel.outcome, func.count()
-    ).select_from(AuditLogModel)
+    # Las funciones de ventana se evaluan antes de LIMIT/OFFSET: una sola
+    # consulta devuelve la pagina, el total y los contadores por resultado.
+    summary_columns = (
+        func.count().over().label("total_count"),
+        func.count(case((AuditLogModel.outcome == "success", 1)))
+        .over()
+        .label("success_count"),
+        func.count(case((AuditLogModel.outcome == "denied", 1)))
+        .over()
+        .label("denied_count"),
+        func.count(case((AuditLogModel.outcome == "failed", 1)))
+        .over()
+        .label("failed_count"),
+    )
+
+    # joinedload resuelve el actor en la misma consulta.
+    base = (
+        select(AuditLogModel, *summary_columns)
+        .options(joinedload(AuditLogModel.user))
+    )
     if conditions:
         base = base.where(*conditions)
-        count_stmt = count_stmt.where(*conditions)
-        counts_stmt = counts_stmt.where(*conditions)
-
-    total = int(await db.scalar(count_stmt) or 0)
-    counts_result = await db.execute(
-        counts_stmt.group_by(AuditLogModel.outcome)
-    )
-    counts = {"success": 0, "denied": 0, "failed": 0}
-    for outcome, count in counts_result.all():
-        counts[outcome] = int(count)
 
     result = await db.execute(
         base.order_by(AuditLogModel.timestamp.desc())
         .limit(limit)
         .offset(offset)
     )
+    rows = result.unique().all()
+
+    if rows:
+        first = rows[0]
+        total = int(first.total_count or 0)
+        counts = {
+            "success": int(first.success_count or 0),
+            "denied": int(first.denied_count or 0),
+            "failed": int(first.failed_count or 0),
+        }
+        items = [AuditLogOut.model_validate(row[0]) for row in rows]
+    else:
+        # Pagina fuera de rango: solo se necesita el resumen.
+        summary_stmt = select(
+            func.count().label("total"),
+            func.count(case((AuditLogModel.outcome == "success", 1))).label(
+                "success"
+            ),
+            func.count(case((AuditLogModel.outcome == "denied", 1))).label(
+                "denied"
+            ),
+            func.count(case((AuditLogModel.outcome == "failed", 1))).label(
+                "failed"
+            ),
+        ).select_from(AuditLogModel)
+        if conditions:
+            summary_stmt = summary_stmt.where(*conditions)
+
+        summary = (await db.execute(summary_stmt)).one()
+        total = int(summary.total or 0)
+        counts = {
+            "success": int(summary.success or 0),
+            "denied": int(summary.denied or 0),
+            "failed": int(summary.failed or 0),
+        }
+        items = []
 
     return PaginatedAudit(
-        items=[
-            AuditLogOut.model_validate(row)
-            for row in result.scalars().all()
-        ],
+        items=items,
         total=total,
         limit=limit,
         offset=offset,

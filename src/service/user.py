@@ -9,7 +9,7 @@ from fastapi import HTTPException, Request, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload
 
 from src.model.user import RolModel, UserModel
 from src.schema.user import (
@@ -96,7 +96,7 @@ async def _audit_denial(
 async def _get_user_or_404(db: AsyncSession, user_id: uuid.UUID) -> UserModel:
     statement = (
         select(UserModel)
-        .options(selectinload(UserModel.rol))
+        .options(joinedload(UserModel.rol))
         .where(UserModel.id == user_id)
     )
     result = await db.execute(statement)
@@ -187,7 +187,7 @@ async def list_users(
     if is_active is not None:
         conditions.append(UserModel.is_active.is_(is_active))
 
-    base = select(UserModel).options(selectinload(UserModel.rol))
+    base = select(UserModel).options(joinedload(UserModel.rol))
     count_stmt = select(func.count()).select_from(UserModel)
     if conditions:
         base = base.where(*conditions)

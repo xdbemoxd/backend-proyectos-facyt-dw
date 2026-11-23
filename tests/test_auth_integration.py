@@ -808,7 +808,7 @@ async def test_concurrent_last_admin_demotion_leaves_one_admin(monkeypatch):
         async with AsyncSessionLocal() as db:
             await barrier.wait()
             try:
-                await update_user(
+                await user_service.update_user(
                     db,
                     user_id,
                     UserUpdate(id_rol=coordinator_role.id),
