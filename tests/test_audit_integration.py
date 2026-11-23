@@ -361,3 +361,35 @@ async def test_audit_endpoint_filters_and_pagination_validation(admin):
                 "/api/audit", headers=headers, params=params
             )
             assert invalid.status_code == 422, params
+
+@pytest.mark.asyncio
+async def test_audit_counts_ignore_outcome_filter(client, admin_token):
+    # Eventos con entidad "Test": las propias peticiones de auditoria son
+    # entity="HTTP", asi que no alteran estos contadores entre requests.
+    for outcome in ("success", "denied", "failed"):
+        await record_audit_standalone(
+            entity="Test",
+            action="counts_filter_test",
+            entity_id="counts-test",
+            ip_address="127.0.0.1",
+            outcome=outcome,
+        )
+
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    all_response = await client.get(
+        "/api/audit?entity=Test&limit=1", headers=headers
+    )
+    denied_response = await client.get(
+        "/api/audit?entity=Test&limit=1&outcome=denied", headers=headers
+    )
+
+    assert all_response.status_code == 200
+    assert denied_response.status_code == 200
+
+    all_counts = all_response.json()["counts"]
+    denied_counts = denied_response.json()["counts"]
+    assert all_counts == denied_counts
+    assert denied_counts["success"] >= 1
+    assert denied_counts["denied"] >= 1
+    assert denied_counts["failed"] >= 1
