@@ -8,26 +8,24 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from src.model.user import UserModel
-
+from src.router.auth import router_auth
 from src.router.user import router_users
 from src.router.health import router_health
 
 load_dotenv()
 
-limits_string = os.getenv( "RATE_LIMIT" );
+limits_string = os.getenv( "RATE_LIMIT" ) or "100/minute"
 
-limits_list = limits_string.split(",")
+limits_list = [l.strip() for l in limits_string.split(",") if l.strip()]
 
 limiter = Limiter( key_func = get_remote_address, default_limits = limits_list  )
 
 environment = os.getenv( "ENVIRONMENT" )
 
-app = FastAPI(title="My Backend API")
-
 is_production = environment == "production"
 
 app = FastAPI(
+    title="API Control de Proyectos FaCyT",
     docs_url = None if is_production else "/docs",
     redoc_url = None if is_production else "/redoc",
     openapi_url = None if is_production else "/openapi.json",
@@ -49,7 +47,11 @@ if is_production:
         allow_headers=["Authorization", "Content-Type"],
     )
 
-app.include_router( router_users, prefix= "/api" , tags=[ "users" ] );
+# Publico: solo el login.
+app.include_router( router_auth, prefix="/api", tags=[ "auth" ] )
+
+# Protegido con JWT (ver dependencies del router).
+app.include_router( router_users, prefix="/api", tags=[ "users" ] )
 
 app.include_router( router_health, prefix="", tags=[ "system" ] )
 

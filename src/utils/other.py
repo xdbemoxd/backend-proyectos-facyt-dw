@@ -10,7 +10,7 @@ from fastapi import HTTPException, status
 load_dotenv()
 
 #JWT data
-SECRET_KEY: str = os.environ["SECRET_KEY"]
+SECRET_KEY: str = os.getenv("SECRET_KEY") or ""
 
 if not SECRET_KEY:
     raise RuntimeError("La variable de entorno SECRET_KEY no está configurada")

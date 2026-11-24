@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Credenciales de Gmail
+client_secret.json
+get_refresh_token.py
