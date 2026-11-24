@@ -39,6 +39,7 @@ _testing = bool(os.getenv("TEST_DATABASE_URL")) or any(
         "INVENTORY_LIVE_TESTS",
         "EQUIPMENT_LIVE_TESTS",
         "FINANCE_LIVE_TESTS",
+        "REPORTS_LIVE_TESTS",
     )
 )
 if _testing:

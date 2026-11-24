@@ -40,6 +40,7 @@ _LIVE_TESTS = any(
         "INVENTORY_LIVE_TESTS",
         "EQUIPMENT_LIVE_TESTS",
         "FINANCE_LIVE_TESTS",
+        "REPORTS_LIVE_TESTS",
     )
 )
 

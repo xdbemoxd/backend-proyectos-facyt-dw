@@ -17,6 +17,7 @@ Implementado:
 - RBAC con tres roles y verificación del usuario en cada request.
 - Administración de usuarios y consulta de auditoría.
 - Auditoría HTTP append-only.
+- Reportes exportables en Excel (XLSX) y PDF: gastos, prorrateo y equipos.
 - Base de datos completa: esquema, vistas, triggers y seeders.
 - Despliegue local con Docker Compose (PostgreSQL + backend + frontend).
 
@@ -42,9 +43,12 @@ Endpoints actuales:
 | `GET/POST` | `/api/user` | Listar / crear usuarios (admin) |
 | `GET/PATCH` | `/api/user/{id}` | Consultar / editar usuario (admin) |
 | `GET` | `/api/audit` | Consultar auditoría (admin) |
+| `GET` | `/api/reports/expenses.xlsx` / `.pdf` | Reporte de gastos (XLSX/PDF) |
+| `GET` | `/api/reports/overhead.xlsx` / `.pdf` | Reporte de prorrateo (admin/aprobador) |
+| `GET` | `/api/reports/equipment.xlsx` / `.pdf` | Reporte de equipos y reservas |
 
-Documentación detallada: [`docs/auth.md`](docs/auth.md) y
-[`docs/audit.md`](docs/audit.md).
+Documentación detallada: [`docs/auth.md`](docs/auth.md),
+[`docs/audit.md`](docs/audit.md) y [`docs/reports.md`](docs/reports.md).
 
 ---
 
@@ -572,6 +576,9 @@ contraseña de la base y el `GOOGLE_CLIENT_SECRET`.
 
 - [`docs/auth.md`](docs/auth.md) — login, JWT, RBAC, alcance y errores.
 - [`docs/audit.md`](docs/audit.md) — esquema y middleware de auditoría.
+- [`docs/reports.md`](docs/reports.md) — reportes XLSX/PDF, filtros y permisos.
+- [`docs/testing/test-report-2026-11-24-reports.md`](docs/testing/test-report-2026-11-24-reports.md)
+  — evidencia del ciclo de pruebas de los reportes.
 - [`db/README.md`](db/README.md) — detalle de scripts SQL y verificación.
 - [`db/migrations/`](db/migrations) — migraciones incrementales.
 - [`docs/testing/test-report-2026-11-24-db-setup.md`](docs/testing/test-report-2026-11-24-db-setup.md)

@@ -25,6 +25,7 @@ from src.router.health import router_health
 from src.router.inventory import router_inventory
 from src.router.overhead import router_overhead
 from src.router.project import router_projects
+from src.router.report import router_reports
 from src.router.user import router_users
 from src.router.vendor import router_vendors
 
@@ -123,6 +124,7 @@ app.include_router(router_equipment, prefix="/api")
 app.include_router(router_expenses, prefix="/api")
 app.include_router(router_overhead, prefix="/api")
 app.include_router(router_vendors, prefix="/api")
+app.include_router(router_reports, prefix="/api")
 app.include_router(router_audit, prefix="/api", tags=["audit"])
 app.include_router(router_health, prefix="", tags=["system"])
 
