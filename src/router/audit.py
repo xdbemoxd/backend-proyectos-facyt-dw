@@ -53,7 +53,7 @@ async def register_ui_event(
         action=payload.action,
         user_id=current_user.id,
         request=request,
-        http_method="UI",
+        http_method="POST",
         http_path=payload.path,
         status_code=status.HTTP_200_OK,
         after={
