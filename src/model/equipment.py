@@ -92,7 +92,7 @@ class ReservationEquipamentModel(Base):
     )
     id_project = Column(
         UUID(as_uuid=True),
-        ForeignKey('private."Project".id', ondelete="RESTRICT"),
+        ForeignKey("private.Project.id", ondelete="RESTRICT"),
         nullable=False,
     )
     # Usuario que hizo la reserva

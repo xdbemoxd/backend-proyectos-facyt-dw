@@ -59,7 +59,7 @@ class OverheadAllocationModel(Base):
     )
     id_project = Column(
         UUID(as_uuid=True),
-        ForeignKey('private."Project".id', ondelete="RESTRICT"),
+        ForeignKey("private.Project.id", ondelete="RESTRICT"),
         nullable=False,
     )
     amount = Column(Numeric(14, 2), nullable=False)

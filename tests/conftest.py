@@ -30,6 +30,13 @@ os.environ.setdefault("AUDIT_SYNC_WRITES", "true")
 os.environ.setdefault("LOGIN_RATE_LIMIT", "10/minute")
 
 _TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "").strip()
+# Pruebas "live" de solo lectura contra la base real del .env. Se habilitan
+# explicitamente con INVENTORY_LIVE_TESTS=1 y NUNCA insertan lotes/despachos.
+_LIVE_TESTS = os.getenv("INVENTORY_LIVE_TESTS", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 if _TEST_DATABASE_URL:
     # Importante: antes de cualquier import de src.config.db / app.
@@ -52,11 +59,14 @@ if _TEST_DATABASE_URL:
                 "Configura una base de pruebas aislada."
             )
 else:
-    # Sin base de pruebas, cualquier acceso accidental a la BD debe fallar
-    # de inmediato en vez de escribir en la base compartida del .env.
-    os.environ["DATABASE_URL"] = (
-        "postgresql+asyncpg://test:test@127.0.0.1:1/not_configured"
-    )
+    if not _LIVE_TESTS:
+        # Sin base de pruebas, cualquier acceso accidental a la BD debe fallar
+        # de inmediato en vez de escribir en la base compartida del .env.
+        os.environ["DATABASE_URL"] = (
+            "postgresql+asyncpg://test:test@127.0.0.1:1/not_configured"
+        )
+    # Con INVENTORY_LIVE_TESTS=1 se conserva el DATABASE_URL del .env para las
+    # pruebas live de SOLO LECTURA (ver tests/test_inventory_live.py).
 
 
 @pytest.fixture

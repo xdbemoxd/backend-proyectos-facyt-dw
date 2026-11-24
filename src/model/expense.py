@@ -39,7 +39,7 @@ class ExpenseApprovalModel(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid7)
     id_project = Column(
         UUID(as_uuid=True),
-        ForeignKey('private."Project".id', ondelete="RESTRICT"),
+        ForeignKey("private.Project.id", ondelete="RESTRICT"),
         nullable=False,
     )
     # Opcional: la solicitud puede no estar ligada a un material concreto.
