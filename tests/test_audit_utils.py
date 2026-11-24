@@ -3,7 +3,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 
+from src.schema.audit import PageViewIn, UiEventIn
 from src.utils.audit import (
     jsonable,
     outcome_from_status,
@@ -96,6 +98,37 @@ def test_should_audit_request(monkeypatch):
     assert should_audit_request("GET", "/api/user/auth/google/login", 200) is True
     assert should_audit_request("GET", "/api/projects", 500) is True
     assert should_audit_request("GET", "/", 200) is False
+    assert should_audit_request("POST", "/api/audit/pageview", 204) is False
+    assert should_audit_request("POST", "/api/audit/pageview", 401) is True
+    assert should_audit_request("POST", "/api/audit/ui-event", 204) is False
+    assert should_audit_request("POST", "/api/audit/ui-event", 401) is True
 
     monkeypatch.setenv("AUDIT_HTTP_ALL", "true")
     assert should_audit_request("GET", "/", 200) is True
+
+
+def test_pageview_path_is_validated():
+    assert PageViewIn(path="/dashboard/users/0193a1b2-0001-7000-8000-000000000001/edit").path.startswith("/dashboard")
+
+    with pytest.raises(ValidationError):
+        PageViewIn(path="https://ejemplo.com/dashboard")
+
+    with pytest.raises(ValidationError):
+        PageViewIn(path="/dashboard?token=abc")
+
+
+def test_ui_event_is_restricted_to_known_entities_and_actions():
+    event = UiEventIn(
+        entity="RawMaterial",
+        action="create",
+        summary="Nitrato de plata",
+        path="/dashboard/inventory/new",
+    )
+    assert event.entity == "RawMaterial"
+
+    with pytest.raises(ValidationError):
+        UiEventIn(entity="Unknown", action="create", summary="x", path="/dashboard")
+    with pytest.raises(ValidationError):
+        UiEventIn(entity="RawMaterial", action="run", summary="x", path="/dashboard")
+    with pytest.raises(ValidationError):
+        UiEventIn(entity="RawMaterial", action="create", summary="x", path="/login")

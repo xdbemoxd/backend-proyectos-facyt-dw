@@ -212,6 +212,12 @@ def should_audit_request(method: str, path: str, status_code: int) -> bool:
     """
     if path in _EXCLUDED_PATHS:
         return False
+    # El endpoint de navegacion escribe su propio evento de negocio; solo se
+    # audita por HTTP cuando falla (p. ej. 401 de un intento anonimo).
+    if path == "/api/audit/pageview" and status_code < 400:
+        return False
+    if path == "/api/audit/ui-event" and status_code < 400:
+        return False
     # Leer la auditoria tambien es una accion sensible.
     if path.startswith("/api/audit"):
         return True
@@ -293,6 +299,8 @@ async def record_audit(
     after: Any = None,
     request: Request | None = None,
     request_id: uuid.UUID | None = None,
+    http_method: str | None = None,
+    http_path: str | None = None,
 ) -> AuditLogModel:
     """Agrega un evento de negocio a la transaccion actual (sin commit).
 
@@ -310,8 +318,8 @@ async def record_audit(
             request_id = getattr(request.state, "request_id", None)
 
         http_fields = {
-            "method": request.method.upper(),
-            "path": _truncate(request.url.path, 500),
+            "method": (http_method or request.method).upper(),
+            "path": _truncate(http_path or request.url.path, 500),
             "user_agent": _truncate(request.headers.get("user-agent"), 512),
             "request_headers": sanitize_headers(request.headers),
             "query_params": sanitize_query_params(dict(request.query_params)),
