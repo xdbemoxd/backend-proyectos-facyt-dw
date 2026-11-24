@@ -11,6 +11,9 @@ router_health = APIRouter()
 
 
 @router_health.get("/health")
+# TEMPORAL: alias para el health check de la plataforma, configurado como
+# "/healt". Quitar cuando se corrija la ruta en el panel de despliegue.
+@router_health.get("/healt", include_in_schema=False)
 async def health_check():
     """Publico a proposito: lo usan Docker / el balanceador y no expone datos."""
     return {"status": "ok", "message": "API running"}
