@@ -82,7 +82,6 @@ class AuditLogModel(Base):
         UUID(as_uuid=True),
         ForeignKey("private.user.id", ondelete="RESTRICT"),
         nullable=True,
-        index=True,
     )
     # Campo historico. Los nuevos registros lo dejan NULL: el email se
     # resuelve desde private."user" usando user_id/entity_id.
