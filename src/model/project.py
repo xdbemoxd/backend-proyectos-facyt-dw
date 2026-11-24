@@ -96,7 +96,7 @@ class AudithProjectModel(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid7)
     id_project = Column(
         UUID(as_uuid=True),
-        ForeignKey('private."Project".id', ondelete="RESTRICT"),
+        ForeignKey("private.Project.id", ondelete="RESTRICT"),
         nullable=False,
     )
     unique_code = Column(String(50), nullable=False)

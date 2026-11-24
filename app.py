@@ -20,6 +20,7 @@ from src.middleware.audit import AuditMiddleware
 from src.middleware.security_headers import SecurityHeadersMiddleware
 from src.router.audit import router_audit
 from src.router.health import router_health
+from src.router.project import router_projects
 from src.router.user import router_users
 
 load_dotenv()
@@ -111,6 +112,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Rutas
 # ---------------------------------------------------------------------------
 app.include_router(router_users, prefix="/api", tags=["users"])
+app.include_router(router_projects, prefix="/api")
 app.include_router(router_audit, prefix="/api", tags=["audit"])
 app.include_router(router_health, prefix="", tags=["system"])
 
