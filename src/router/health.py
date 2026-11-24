@@ -10,10 +10,10 @@ logger = logging.getLogger(__name__)
 router_health = APIRouter()
 
 
-@router_health.get("/health")
+@router_health.api_route("/health", methods=["GET", "HEAD"])
 # TEMPORAL: alias para el health check de la plataforma, configurado como
 # "/healt". Quitar cuando se corrija la ruta en el panel de despliegue.
-@router_health.get("/healt", include_in_schema=False)
+@router_health.api_route("/healt", methods=["GET", "HEAD"], include_in_schema=False)
 async def health_check():
     """Publico a proposito: lo usan Docker / el balanceador y no expone datos."""
     return {"status": "ok", "message": "API running"}

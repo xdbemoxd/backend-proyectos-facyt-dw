@@ -115,6 +115,7 @@ app.include_router(router_audit, prefix="/api", tags=["audit"])
 app.include_router(router_health, prefix="", tags=["system"])
 
 
-@app.get("/")
+# HEAD: Render y otros balanceadores comprueban el servicio con HEAD /.
+@app.api_route("/", methods=["GET", "HEAD"])
 def read_root():
     return {"status": "success", "message": "API is up and running"}
