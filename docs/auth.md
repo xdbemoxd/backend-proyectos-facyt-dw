@@ -491,3 +491,24 @@ omitirse; no deben escribir en la base compartida.
 
 El detalle de casos, resultados y limitaciones está en
 `docs/testing/test-report-2026-11-22-rbac.md`.
+
+## 11. Rutas públicas del frontend
+
+Sin sesión solo se sirve la portada informativa. Ninguna vista pública consulta
+proyectos, inventario, usuarios ni auditoría.
+
+| Ruta | Contenido |
+|---|---|
+| `/` | Portada institucional sin datos. Con sesión redirige a `/dashboard`. |
+| `/login` | Inicio de sesión con Google. |
+| `/unauthorized` | Error de acceso (dominio o rol no permitido). |
+| `/api/auth/*` | Callback de NextAuth. |
+
+Todo lo demás (`/dashboard/**`) está protegido por el proxy de NextAuth y, aun
+así, cada llamada al backend vuelve a validar el JWT, el rol y el alcance. Los
+BFF routes del frontend (`/api/users`, `/api/roles`, `/api/audit`) reenvían el
+token de la sesión; sin token responden `401`.
+
+> La portada nunca debe renderizar datos reales. Si en el futuro se agrega un
+> catálogo público, debe ser una vista explícitamente aprobada, con datos
+> mínimos y sin información presupuestaria, de responsables ni de auditoría.
