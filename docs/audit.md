@@ -75,26 +75,18 @@ Se auditan:
 
 No se auditan `/health`, `/docs`, `/redoc` ni `/openapi.json`.
 
-### Navegación y acciones de interfaz
+### Navegación
 
-El frontend registra dos tipos de eventos mediante endpoints autenticados:
-
-- `POST /api/audit/pageview`: una fila por cambio de ruta en `/dashboard/...`
-  (`entity=Navigation`, `action=page_view`, método `GET`). El endpoint escribe
-  su propio evento; por eso el middleware no duplica el `POST` exitoso.
-- `POST /api/audit/ui-event`: acciones ejecutadas mientras los módulos siguen
-  usando datos mock (proyectos, inventario, lotes, etc.). Se guardan con
-  `source="ui_mock"` y el rol del actor dentro de `after_data`.
-
-Ambos derivan usuario, IP y user-agent del JWT y de la request; el cliente no
-elige el usuario. Tienen rate limit propio (`PAGEVIEW_RATE_LIMIT` y
-`UI_EVENT_RATE_LIMIT`). Los intentos anónimos (`401`) se registran igual por el
+El frontend registra una fila por cambio de ruta en `/dashboard/...` con
+`POST /api/audit/pageview` (`entity=Navigation`, `action=page_view`, método
+`GET`). El endpoint escribe su propio evento; por eso el middleware no duplica
+el `POST` exitoso. El usuario, la IP y el user-agent se derivan del JWT y de la
+request; el cliente no elige el usuario. Tiene rate limit propio
+(`PAGEVIEW_RATE_LIMIT`). Los intentos anónimos (`401`) se registran igual por el
 middleware HTTP, incluidos los `404` de reconocimiento.
 
-> `ui-event` es un registro de actividad de interfaz, **no** una auditoría
-> autoritativa de cambios en la base. Al conectar los endpoints reales, cada
-> mutación debe auditarse en el servicio con `record_audit` y este puente debe
-> eliminarse.
+Las mutaciones de negocio (proyectos, inventario, equipos, gastos, prorrateo,
+reportes) se auditan en el backend con `record_audit`, no desde el navegador.
 
 ### Variables de entorno
 

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -7,38 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class PageViewIn(BaseModel):
     path: str = Field(min_length=1, max_length=300, pattern=r"^/[A-Za-z0-9/_-]*$")
-
-
-UiEntity = Literal[
-    "Project",
-    "Vendor",
-    "RawMaterial",
-    "Lot",
-    "Dispatch",
-    "Equipment",
-    "Reservation",
-    "Expense",
-    "OverheadPeriod",
-]
-
-UiAction = Literal[
-    "create",
-    "update",
-    "delete",
-    "update_priority",
-    "update_status",
-    "register_lot",
-    "dispatch",
-    "close_period",
-    "reserve",
-]
-
-
-class UiEventIn(BaseModel):
-    entity: UiEntity
-    action: UiAction
-    summary: str = Field(min_length=1, max_length=200)
-    path: str = Field(min_length=1, max_length=300, pattern=r"^/dashboard[A-Za-z0-9/_-]*$")
 
 
 class AuditUserOut(BaseModel):

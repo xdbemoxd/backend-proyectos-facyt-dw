@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.db import get_db
-from src.config.rate_limit import PAGEVIEW_RATE_LIMIT, UI_EVENT_RATE_LIMIT, limiter
-from src.schema.audit import AuditUserOut, PageViewIn, PaginatedAudit, UiEventIn
+from src.config.rate_limit import PAGEVIEW_RATE_LIMIT, limiter
+from src.schema.audit import AuditUserOut, PageViewIn, PaginatedAudit
 from src.schema.user import CurrentUser
 from src.service.audit import list_audit, list_audit_users
 from src.utils.audit import record_audit
@@ -42,33 +42,6 @@ async def register_page_view(
         http_path=payload.path,
         status_code=status.HTTP_200_OK,
         after={"path": payload.path},
-    )
-    await db.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@router_audit.post("/audit/ui-event", status_code=status.HTTP_204_NO_CONTENT)
-@limiter.limit(UI_EVENT_RATE_LIMIT)
-async def register_ui_event(
-    request: Request,
-    payload: UiEventIn,
-    current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    await record_audit(
-        db,
-        entity=payload.entity,
-        action=payload.action,
-        user_id=current_user.id,
-        request=request,
-        http_method="POST",
-        http_path=payload.path,
-        status_code=status.HTTP_200_OK,
-        after={
-            "summary": payload.summary,
-            "source": "ui_mock",
-            "role": current_user.rol,
-        },
     )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

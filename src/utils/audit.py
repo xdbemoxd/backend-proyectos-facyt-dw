@@ -218,8 +218,6 @@ def should_audit_request(method: str, path: str, status_code: int) -> bool:
     # audita por HTTP cuando falla (p. ej. 401 de un intento anonimo).
     if path == "/api/audit/pageview" and status_code < 400:
         return False
-    if path == "/api/audit/ui-event" and status_code < 400:
-        return False
     if method.upper() not in {"GET", "HEAD", "OPTIONS"}:
         return True
     if path.startswith("/api/user/auth/"):

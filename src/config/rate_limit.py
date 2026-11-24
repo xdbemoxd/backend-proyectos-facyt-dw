@@ -46,6 +46,3 @@ LOGIN_RATE_LIMIT = os.getenv("LOGIN_RATE_LIMIT", "10/minute")
 
 # Navegacion del frontend: evita que un cliente con sesion sature audit_log.
 PAGEVIEW_RATE_LIMIT = os.getenv("PAGEVIEW_RATE_LIMIT", "120/minute")
-
-# Acciones de interfaz mientras los modulos siguen con datos mock.
-UI_EVENT_RATE_LIMIT = os.getenv("UI_EVENT_RATE_LIMIT", "120/minute")
