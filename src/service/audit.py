@@ -10,7 +10,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from src.model.audit import AuditLogModel
-from src.schema.audit import AuditLogOut, PaginatedAudit
+from src.model.user import UserModel
+from src.schema.audit import AuditLogOut, AuditUserOut, PaginatedAudit
+
+
+async def list_audit_users(db: AsyncSession) -> list[AuditUserOut]:
+    """Usuarios activos para el filtro de la vista de auditoria."""
+    statement = (
+        select(UserModel)
+        .where(UserModel.is_active.is_(True))
+        .order_by(UserModel.name, UserModel.lastname, UserModel.email)
+    )
+    rows = (await db.execute(statement)).scalars().all()
+    return [AuditUserOut.model_validate(user) for user in rows]
 
 
 async def _outcome_counts(

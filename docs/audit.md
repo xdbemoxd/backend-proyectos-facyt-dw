@@ -69,6 +69,9 @@ Se auditan:
 - Login (`/api/user/auth/...`).
 - Cualquier respuesta `>= 400`.
 - `GET` exitosos solo si `AUDIT_HTTP_ALL=true`.
+- Las lecturas exitosas de `/api/audit` no se duplican: el acceso queda
+  registrado por el evento de navegación (`page_view`). Los intentos fallidos
+  de leer la auditoría sí se registran.
 
 No se auditan `/health`, `/docs`, `/redoc` ni `/openapi.json`.
 

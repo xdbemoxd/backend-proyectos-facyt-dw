@@ -6,14 +6,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.db import get_db
 from src.config.rate_limit import PAGEVIEW_RATE_LIMIT, UI_EVENT_RATE_LIMIT, limiter
-from src.schema.audit import PageViewIn, PaginatedAudit, UiEventIn
+from src.schema.audit import AuditUserOut, PageViewIn, PaginatedAudit, UiEventIn
 from src.schema.user import CurrentUser
-from src.service.audit import list_audit
+from src.service.audit import list_audit, list_audit_users
 from src.utils.audit import record_audit
 from src.utils.auth import get_current_user, require_roles
 from src.utils.roles import ADMIN_ROLE
 
 router_audit = APIRouter()
+
+
+@router_audit.get("/audit/users", response_model=list[AuditUserOut])
+async def get_audit_users(
+    _: CurrentUser = Depends(require_roles(ADMIN_ROLE)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await list_audit_users(db)
 
 
 @router_audit.post("/audit/pageview", status_code=status.HTTP_204_NO_CONTENT)

@@ -102,6 +102,8 @@ def test_should_audit_request(monkeypatch):
     assert should_audit_request("POST", "/api/audit/pageview", 401) is True
     assert should_audit_request("POST", "/api/audit/ui-event", 204) is False
     assert should_audit_request("POST", "/api/audit/ui-event", 401) is True
+    assert should_audit_request("GET", "/api/audit", 200) is False
+    assert should_audit_request("GET", "/api/audit", 401) is True
 
     monkeypatch.setenv("AUDIT_HTTP_ALL", "true")
     assert should_audit_request("GET", "/", 200) is True

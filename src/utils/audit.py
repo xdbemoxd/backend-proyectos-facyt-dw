@@ -71,6 +71,8 @@ _EXCLUDED_PATHS = {
     "/openapi.json",
 }
 
+_HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+
 
 def _truncate(value: Any, limit: int) -> str | None:
     if value is None:
@@ -218,9 +220,6 @@ def should_audit_request(method: str, path: str, status_code: int) -> bool:
         return False
     if path == "/api/audit/ui-event" and status_code < 400:
         return False
-    # Leer la auditoria tambien es una accion sensible.
-    if path.startswith("/api/audit"):
-        return True
     if method.upper() not in {"GET", "HEAD", "OPTIONS"}:
         return True
     if path.startswith("/api/user/auth/"):
@@ -318,7 +317,11 @@ async def record_audit(
             request_id = getattr(request.state, "request_id", None)
 
         http_fields = {
-            "method": (http_method or request.method).upper(),
+            "method": (
+                (http_method or request.method).upper()
+                if (http_method or request.method).upper() in _HTTP_METHODS
+                else request.method.upper()
+            ),
             "path": _truncate(http_path or request.url.path, 500),
             "user_agent": _truncate(request.headers.get("user-agent"), 512),
             "request_headers": sanitize_headers(request.headers),
