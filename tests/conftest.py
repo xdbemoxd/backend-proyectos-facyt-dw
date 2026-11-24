@@ -31,11 +31,16 @@ os.environ.setdefault("LOGIN_RATE_LIMIT", "10/minute")
 
 _TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "").strip()
 # Pruebas "live" de solo lectura contra la base real del .env. Se habilitan
-# explicitamente con INVENTORY_LIVE_TESTS=1 o EQUIPMENT_LIVE_TESTS=1 y NUNCA
-# insertan lotes, despachos ni reservas exitosas.
+# explicitamente con INVENTORY_LIVE_TESTS=1, EQUIPMENT_LIVE_TESTS=1 o
+# FINANCE_LIVE_TESTS=1 y NUNCA insertan lotes, despachos, reservas, gastos ni
+# periodos de overhead.
 _LIVE_TESTS = any(
     os.getenv(name, "").strip().lower() in ("1", "true", "yes")
-    for name in ("INVENTORY_LIVE_TESTS", "EQUIPMENT_LIVE_TESTS")
+    for name in (
+        "INVENTORY_LIVE_TESTS",
+        "EQUIPMENT_LIVE_TESTS",
+        "FINANCE_LIVE_TESTS",
+    )
 )
 
 if _TEST_DATABASE_URL:

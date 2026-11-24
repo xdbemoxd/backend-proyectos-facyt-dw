@@ -12,7 +12,7 @@ SET client_encoding = 'UTF8';
 -- Solicitudes de gasto (maquina de estados RN-7)
 -- ----------------------------------------------------------------------------
 INSERT INTO private.expense_approval
-    (id, id_project, id_raw_materials_suppliers, id_status,
+    (id, id_project, id_raw_materials_suppliers, id_status, id_user,
      description, count_raw_materials)
 SELECT
     '01900000-0000-7000-8000-0000000000a1',
@@ -25,6 +25,7 @@ SELECT
         AND v.name = 'Proveedor Quimico Andino, C.A.'
       LIMIT 1),
     st.id,
+    p.id_user,
     'Compra de acido clorhidrico para digestion de muestras.',
     10.00
 FROM private."Project" AS p, private.status_expense_approval AS st
@@ -33,7 +34,7 @@ WHERE p.unique_code = 'FIS-2026-001'
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO private.expense_approval
-    (id, id_project, id_raw_materials_suppliers, id_status,
+    (id, id_project, id_raw_materials_suppliers, id_status, id_user,
      description, count_raw_materials)
 SELECT
     '01900000-0000-7000-8000-0000000000a2',
@@ -46,6 +47,7 @@ SELECT
         AND v.name = 'Insumos de Laboratorio Central, C.A.'
       LIMIT 1),
     st.id,
+    p.id_user,
     'Reposicion de guantes de nitrilo para el area de sintesis.',
     15.00
 FROM private."Project" AS p, private.status_expense_approval AS st
@@ -54,7 +56,7 @@ WHERE p.unique_code = 'QUI-2026-002'
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO private.expense_approval
-    (id, id_project, id_raw_materials_suppliers, id_status,
+    (id, id_project, id_raw_materials_suppliers, id_status, id_user,
      description, count_raw_materials)
 SELECT
     '01900000-0000-7000-8000-0000000000a3',
@@ -67,6 +69,7 @@ SELECT
         AND v.name = 'Insumos de Laboratorio Central, C.A.'
       LIMIT 1),
     st.id,
+    p.id_user,
     'Adquisicion de medio de cultivo para el aislamiento de cepas.',
     2000.00
 FROM private."Project" AS p, private.status_expense_approval AS st
@@ -75,13 +78,14 @@ WHERE p.unique_code = 'BIO-2026-003'
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO private.expense_approval
-    (id, id_project, id_raw_materials_suppliers, id_status,
+    (id, id_project, id_raw_materials_suppliers, id_status, id_user,
      description, count_raw_materials)
 SELECT
     '01900000-0000-7000-8000-0000000000a4',
     p.id,
     NULL,
     st.id,
+    p.id_user,
     'Servicio externo de calibracion del espectrofotometro.',
     1.00
 FROM private."Project" AS p, private.status_expense_approval AS st
@@ -90,7 +94,7 @@ WHERE p.unique_code = 'FIS-2026-004'
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO private.expense_approval
-    (id, id_project, id_raw_materials_suppliers, id_status,
+    (id, id_project, id_raw_materials_suppliers, id_status, id_user,
      description, count_raw_materials)
 SELECT
     '01900000-0000-7000-8000-0000000000a5',
@@ -103,6 +107,7 @@ SELECT
         AND v.name = 'Proveedor Quimico Andino, C.A.'
       LIMIT 1),
     st.id,
+    p.id_user,
     'Reactivo no presupuestado para el periodo en curso.',
     5.00
 FROM private."Project" AS p, private.status_expense_approval AS st

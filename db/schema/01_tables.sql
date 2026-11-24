@@ -274,6 +274,7 @@ CREATE TABLE IF NOT EXISTS private.expense_approval (
     id_project                uuid NOT NULL,
     id_raw_materials_suppliers uuid,
     id_status                 smallint NOT NULL,
+    id_user                   uuid NOT NULL,
     description               varchar(255) NOT NULL,
     count_raw_materials       numeric(14, 2) NOT NULL,
     created_at                timestamptz NOT NULL DEFAULT now(),
@@ -285,7 +286,9 @@ CREATE TABLE IF NOT EXISTS private.expense_approval (
         FOREIGN KEY (id_raw_materials_suppliers)
         REFERENCES private.raw_material_supplier (id) ON DELETE RESTRICT,
     CONSTRAINT expense_approval_id_status_fkey FOREIGN KEY (id_status)
-        REFERENCES private.status_expense_approval (id) ON DELETE RESTRICT
+        REFERENCES private.status_expense_approval (id) ON DELETE RESTRICT,
+    CONSTRAINT expense_approval_id_user_fkey FOREIGN KEY (id_user)
+        REFERENCES private."user" (id) ON DELETE RESTRICT
 );
 
 -- ----------------------------------------------------------------------------

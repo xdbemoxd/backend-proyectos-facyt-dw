@@ -82,6 +82,8 @@ CREATE INDEX IF NOT EXISTS idx_expense_supplier
     ON private.expense_approval (id_raw_materials_suppliers);
 CREATE INDEX IF NOT EXISTS idx_expense_created
     ON private.expense_approval (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_expense_requester
+    ON private.expense_approval (id_user);
 
 -- Overhead ---------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_overhead_alloc_project

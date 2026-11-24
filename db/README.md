@@ -80,7 +80,7 @@ archivos en el orden anterior. Es idempotente y se puede volver a ejecutar.
 | `dispatch_log` | Despachos |
 | `status_equipament`, `equipment`, `equipament_supplier` | Equipos y unidades |
 | `reservation_equipament` | Reservas |
-| `status_expense_approval`, `expense_approval` | Solicitudes (`modifiet_at`, sic) |
+| `status_expense_approval`, `expense_approval` | Solicitudes (`modifiet_at`, sic) con `id_user` (solicitante) |
 | `overhead_period`, `overhead_allocation` | Cierre y reparto |
 | `audit_log` | Auditoría append-only |
 
@@ -128,7 +128,7 @@ fechas de modificación. Todos se recrean con `DROP TRIGGER IF EXISTS`.
 | `02_users_projects.sql` | 4 usuarios demo, 4 proyectos y un historial de prioridad |
 | `03_inventory.sql` | 3 proveedores, 6 materiales, 7 filas de stock y 7 lotes |
 | `04_equipment.sql` | 3 equipos, 4 unidades y 3 reservas sin solape |
-| `05_expenses_overhead.sql` | 5 solicitudes y 1 período de overhead con reparto exacto |
+| `05_expenses_overhead.sql` | 5 solicitudes (con solicitante) y 1 período de overhead con reparto exacto |
 | `99_verify.sql` | Verificación de roles, proyectos y suma de overhead; imprime stock |
 
 ### Cuentas de prueba

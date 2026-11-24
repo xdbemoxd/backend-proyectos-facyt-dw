@@ -5,9 +5,10 @@ from sqlalchemy.orm import relationship
 from uuid6 import uuid7
 
 from src.config.db import Base
-# Para resolver las relaciones con proyecto y stock por proveedor.
+# Para resolver las relaciones con proyecto, stock por proveedor y solicitante.
 from src.model.project import ProjectModel  # noqa: F401
 from src.model.inventory import RawMaterialSupplierModel  # noqa: F401
+from src.model.user import UserModel  # noqa: F401
 
 
 class StatusExpenseApprovalModel(Base):
@@ -53,6 +54,12 @@ class ExpenseApprovalModel(Base):
         ForeignKey("private.status_expense_approval.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    # Solicitante: impide que un aprobador apruebe su propia solicitud.
+    id_user = Column(
+        UUID(as_uuid=True),
+        ForeignKey("private.user.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     description = Column(String(255), nullable=False)
     count_raw_materials = Column(Numeric(14, 2), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -67,3 +74,4 @@ class ExpenseApprovalModel(Base):
     project = relationship("ProjectModel")
     raw_material_supplier = relationship("RawMaterialSupplierModel")
     status = relationship("StatusExpenseApprovalModel", back_populates="expenses")
+    requester = relationship("UserModel")
