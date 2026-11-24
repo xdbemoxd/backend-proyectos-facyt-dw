@@ -1,0 +1,122 @@
+# ============================================================================
+# docker-compose.yml — despliegue local reproducible
+#
+#   PostgreSQL 16 + backend FastAPI + frontend Next.js
+#
+# Uso:
+#   cp .env.example .env        (y completar valores locales)
+#   docker compose up --build
+#
+# El frontend se construye desde el repositorio hermano:
+#   ../frontend-proyectos-facyt
+# Si este compose se mueve de carpeta, ajusta `frontend.build.context`.
+#
+# Los valores por defecto son SOLO para desarrollo local. No son secretos
+# reales y no deben usarse en produccion.
+# ============================================================================
+
+name: proyectos-facyt
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-proyectos_facyt}
+      POSTGRES_USER: ${POSTGRES_USER:-proyectos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-proyectos_local}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-proyectos} -d ${POSTGRES_DB:-proyectos_facyt}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Aplica db/schema/*.sql y db/seeds/*.sql una vez que la base esta sana.
+  # Es idempotente: se puede volver a ejecutar en cada `compose up`.
+  db-init:
+    image: postgres:16-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-proyectos_facyt}
+      PGUSER: ${POSTGRES_USER:-proyectos}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-proyectos_local}
+      PGCLIENTENCODING: UTF8
+      DB_ROOT: /db
+    volumes:
+      - ./db:/db:ro
+    entrypoint: ["/bin/sh", "/db/scripts/init_db.sh"]
+    restart: "no"
+
+  backend:
+    build:
+      context: .
+      dockerfile: dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-proyectos}:${POSTGRES_PASSWORD:-proyectos_local}@db:5432/${POSTGRES_DB:-proyectos_facyt}
+      SCHEMA: private
+      SECRET_KEY: ${SECRET_KEY:-local-dev-only-change-me-32-chars-minimum}
+      JWT_ISSUER: ${JWT_ISSUER:-proyectos-facyt-api}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-proyectos-facyt-frontend}
+      JWT_ACCESS_TTL_MINUTES: ${JWT_ACCESS_TTL_MINUTES:-60}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-local-dev.apps.googleusercontent.com}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-local-dev-only}
+      GOOGLE_ALLOWED_DOMAIN: ${GOOGLE_ALLOWED_DOMAIN:-}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      ENABLE_DOCS: ${ENABLE_DOCS:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      RATE_LIMIT: ${RATE_LIMIT:-100/minute}
+      LOGIN_RATE_LIMIT: ${LOGIN_RATE_LIMIT:-10/minute}
+      TRUST_PROXY_HEADERS: "false"
+      AUDIT_HTTP_ALL: "false"
+      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-365}
+      TOKEN_CRON: ${TOKEN_CRON:-local-dev-only}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+
+  frontend:
+    build:
+      context: ../frontend-proyectos-facyt
+      dockerfile: Dockerfile
+      args:
+        # Se incrusta en el bundle del navegador: debe fijarse en build time.
+        NEXT_PUBLIC_ALLOWED_EMAIL_DOMAIN: ${NEXT_PUBLIC_ALLOWED_EMAIL_DOMAIN:-}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      # Comunicacion server-side (BFF) dentro de la red de compose.
+      BACKEND_URL: http://backend:8000
+      AUTH_SECRET: ${AUTH_SECRET:-local-dev-only-change-me-32-chars-minimum}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-local-dev-only-change-me-32-chars-minimum}
+      # URL publica que ve el navegador. Si cambias FRONTEND_PORT, ajusta estas.
+      AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      AUTH_TRUST_HOST: "true"
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-local-dev.apps.googleusercontent.com}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-local-dev-only}
+      NEXT_PUBLIC_ALLOWED_EMAIL_DOMAIN: ${NEXT_PUBLIC_ALLOWED_EMAIL_DOMAIN:-}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+
+volumes:
+  pgdata:
+    name: proyectos-facyt-pgdata

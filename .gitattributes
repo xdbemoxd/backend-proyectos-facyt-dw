@@ -1,0 +1,2 @@
+# Scripts POSIX que se ejecutan dentro de contenedores Linux: forzar LF.
+*.sh text eol=lf
