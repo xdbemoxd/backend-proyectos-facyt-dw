@@ -33,9 +33,10 @@ engine_kwargs = {
 # Las pruebas usan NullPool para no atar conexiones a un event loop que se
 # cierra entre tests. La aplicacion reutiliza conexiones (pool) para evitar
 # el costo de abrir una conexion nueva en cada request contra Supabase.
-_testing = bool(os.getenv("TEST_DATABASE_URL")) or os.getenv(
-    "INVENTORY_LIVE_TESTS", ""
-).strip().lower() in ("1", "true", "yes")
+_testing = bool(os.getenv("TEST_DATABASE_URL")) or any(
+    os.getenv(name, "").strip().lower() in ("1", "true", "yes")
+    for name in ("INVENTORY_LIVE_TESTS", "EQUIPMENT_LIVE_TESTS")
+)
 if _testing:
     engine_kwargs["poolclass"] = NullPool
 else:

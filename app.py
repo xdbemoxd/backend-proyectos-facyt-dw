@@ -19,6 +19,7 @@ from src.config.rate_limit import limiter
 from src.middleware.audit import AuditMiddleware
 from src.middleware.security_headers import SecurityHeadersMiddleware
 from src.router.audit import router_audit
+from src.router.equipment import router_equipment
 from src.router.health import router_health
 from src.router.inventory import router_inventory
 from src.router.project import router_projects
@@ -116,6 +117,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 app.include_router(router_users, prefix="/api", tags=["users"])
 app.include_router(router_projects, prefix="/api")
 app.include_router(router_inventory, prefix="/api")
+app.include_router(router_equipment, prefix="/api")
 app.include_router(router_vendors, prefix="/api")
 app.include_router(router_audit, prefix="/api", tags=["audit"])
 app.include_router(router_health, prefix="", tags=["system"])
