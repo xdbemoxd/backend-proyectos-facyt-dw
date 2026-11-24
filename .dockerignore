@@ -1,0 +1,22 @@
+# Entorno virtual local (Windows): no sirve en Linux y pesa mucho
+env/
+.venv/
+venv/
+
+# Secretos: se pasan con --env-file o variables del servidor
+.env
+.env.*
+client_secret.json
+get_refresh_token.py
+
+# Basura de desarrollo
+__pycache__/
+*.py[cod]
+.git/
+.gitignore
+.vscode/
+.idea/
+*.log
+dockerfile
+Dockerfile
+.dockerignore

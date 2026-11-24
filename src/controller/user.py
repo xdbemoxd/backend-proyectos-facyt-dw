@@ -1,13 +1,14 @@
-import uuid
 import os
+import uuid
 import asyncio
 import logging
+import time
 from typing import cast
 from dotenv import load_dotenv
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
@@ -38,7 +39,7 @@ def _unauthorized() -> HTTPException:
 async def _get_user_by_email(email: str, db: AsyncSession) -> UserModel | None:
     stmt = (
         select(UserModel)
-        .options(selectinload(UserModel.rol))  # evita lazy-load en async
+        .options(joinedload(UserModel.rol))  # evita lazy-load en async
         .where(UserModel.email == email)
     )
     result = await db.execute(stmt)
@@ -46,29 +47,45 @@ async def _get_user_by_email(email: str, db: AsyncSession) -> UserModel | None:
 
 
 async def complete_user_profile(user: UserModel, name: str, lastname: str, db: AsyncSession) -> UserModel:
-    """Completa nombre/apellido y activa la cuenta en el primer login con Google."""
+    """Completa nombre/apellido en el primer login.
+
+    No activa la cuenta: la activacion/desactivacion es una decision del
+    administrador y no debe revertirse con un login.
+    """
     try:
         user.name = name or None # type: ignore
         user.lastname = lastname or None # type: ignore
-        user.is_active = True # type: ignore
         await db.commit()
         await db.refresh(user)
         return user
     except Exception as e:
         await db.rollback()
-        logger.error(f"Exception: {e}")
+        # Error interno: se registra el traceback solo en logs, nunca en la
+        # respuesta. Sin volcar el mensaje del driver al cliente.
+        logger.error(
+            "Error completando perfil de usuario (%s)",
+            type(e).__name__,
+            exc_info=True,
+        )
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error")
 
 
-async def verify_auth_google(token: str, db: AsyncSession) -> dict:
+async def verify_auth_google(
+    token: str, db: AsyncSession, request: Request | None = None
+) -> dict:
+    started = time.perf_counter()
+
     # 1. Verificar firma, exp, iss y aud del id_token (llamada bloqueante -> hilo aparte)
     try:
         idinfo = await asyncio.to_thread(
             id_token.verify_oauth2_token, token, _google_request, GOOGLE_CLIENT_ID
         )
     except ValueError as e:
-        logger.warning(f"id_token invalido: {e}")
+        # No se registra el token ni el mensaje del verificador.
+        logger.warning("id_token invalido (%s)", type(e).__name__)
         raise _unauthorized()
+
+    verified_at = time.perf_counter()
 
     # 2. Claims obligatorios
     email = idinfo.get("email")
@@ -77,16 +94,22 @@ async def verify_auth_google(token: str, db: AsyncSession) -> dict:
         raise _unauthorized()
 
     if GOOGLE_ALLOWED_DOMAIN and idinfo.get("hd") != GOOGLE_ALLOWED_DOMAIN:
-        logger.warning(f"Dominio no permitido: {idinfo.get('hd')}")
+        logger.warning("Dominio de Google no permitido")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Error")
 
     # 3. Solo usuarios pre-registrados por un administrador
     user = await _get_user_by_email(email, db)
+    db_at = time.perf_counter()
     if user is None:
         logger.info("Login Google con email no registrado")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Error")
 
-    # 4. Primer login: completar perfil con los datos de Google y activar
+    # 4. Una cuenta desactivada no puede entrar, ni siquiera en el primer login.
+    if not cast(bool, user.is_active):
+        logger.info("Cuenta inactiva: %s", user.id)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Error")
+
+    # 5. Primer login: completar perfil con los datos de Google (sin activar).
     if user.name is None or user.lastname is None:
         user = await complete_user_profile(
             user,
@@ -94,13 +117,27 @@ async def verify_auth_google(token: str, db: AsyncSession) -> dict:
             (idinfo.get("family_name") or "").strip(),
             db,
         )
-    elif not cast(bool, user.is_active):
-        # Cuenta ya completada pero desactivada por un admin
-        logger.info(f"Cuenta inactiva: {user.id}")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Error")
 
     rol_name = user.rol.name if user.rol else None
-    access_token = generate_jwt_to_frontend(user.id, user.email, rol_name) # type: ignore
+    access_token = generate_jwt_to_frontend(
+        user.id,
+        user.email,
+        rol_name,
+        int(getattr(user, "token_version", 0) or 0),
+    ) # type: ignore
+
+    # Deja el actor autenticado disponible para el middleware de auditoria.
+    if request is not None:
+        request.state.user_id = str(user.id)
+        request.state.user_email = user.email
+        request.state.user_role = rol_name
+
+    logger.info(
+        "Google login timing: verify=%.2fs db=%.2fs total=%.2fs",
+        verified_at - started,
+        db_at - verified_at,
+        time.perf_counter() - started,
+    )
 
     return {
         "id": str(user.id),
@@ -121,7 +158,7 @@ async def list_roles(db: AsyncSession) -> list[dict]:
 
 
 async def _active_admin_emails(db: AsyncSession) -> list[str]:
-    from src.utils.auth import is_admin_role
+    from src.utils.roles import is_admin_role
 
     stmt = (
         select(UserModel.email, RolModel.name)
@@ -148,7 +185,9 @@ async def create_user(data: UserCreateRequest, db: AsyncSession) -> tuple[UserMo
     if exists.first() is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ese correo ya está registrado.")
 
-    user = UserModel(email=email, id_rol=rol.id, is_active=False)
+    # Activo desde el alta: "pendiente" = sin nombre hasta su primer login.
+    # (Un inactivo ya no puede entrar, ni siquiera la primera vez.)
+    user = UserModel(email=email, id_rol=rol.id, is_active=True)
     db.add(user)
     try:
         await db.commit()
@@ -229,7 +268,7 @@ async def update_user(user_id: uuid.UUID, data: UserUpdateRequest, current: User
     - Debe quedar al menos un administrador activo.
     - Un usuario pendiente de primer ingreso se activa solo al entrar con Google.
     """
-    from src.utils.auth import is_admin_role
+    from src.utils.roles import is_admin_role
 
     user = await _get_user_with_rol(user_id, db)
 
@@ -242,8 +281,8 @@ async def update_user(user_id: uuid.UUID, data: UserUpdateRequest, current: User
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="No puedes cambiar tu propio rol ni desactivar tu cuenta.")
 
-    pending = user.name is None or user.lastname is None
-    new_active = bool(user.is_active) if pending else data.is_active
+    # El estado lo decide el admin (tambien para usuarios pendientes).
+    new_active = data.is_active
 
     was_active_admin = bool(user.is_active) and is_admin_role(user.rol.name if user.rol else None)
     stays_active_admin = new_active and is_admin_role(rol.name)
@@ -257,9 +296,14 @@ async def update_user(user_id: uuid.UUID, data: UserUpdateRequest, current: User
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail="Debe quedar al menos un administrador activo.")
 
+    changed = rol.id != user.id_rol or new_active != bool(user.is_active)
+
     try:
         user.rol = rol
         user.is_active = new_active  # type: ignore
+        if changed:
+            # Sus JWT dejan de valer: debe volver a iniciar sesion con el rol/estado nuevo.
+            user.token_version = (user.token_version or 0) + 1  # type: ignore
         await db.commit()
     except Exception as e:
         await db.rollback()

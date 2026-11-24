@@ -1,76 +1,117 @@
 import uuid
-import logging
-from fastapi import APIRouter, BackgroundTasks, Depends, status
+
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.controller.user import (
-    create_user,
-    get_user,
-    list_roles,
-    list_users,
-    update_user,
-    role_label_of,
-    send_user_created_emails,
-)
-from src.schema.user import UserCreateRequest, UserUpdateRequest
+
 from src.config.db import get_db
-from src.model.user import UserModel
-from src.utils.auth import get_current_user, require_admin
-from src.utils.mailer import mail_configured
+from src.config.rate_limit import LOGIN_RATE_LIMIT, limiter
+from src.controller.user import verify_auth_google
+from src.schema.user import (
+    CurrentUser,
+    GoogleAuthRequest,
+    PaginatedUsers,
+    RoleOut,
+    UserCreate,
+    UserOut,
+    UserUpdate,
+)
+from src.service import auth as auth_service
+from src.service import user as user_service
+from src.utils.auth import get_current_user, require_roles
+from src.utils.roles import ADMIN_ROLE
 
-logger = logging.getLogger(__name__)
-
-# Todo este router exige JWT valido (y usuario activo en la BD).
-# La gestion de usuarios y roles ademas exige rol admin_sistema.
-router_users = APIRouter(dependencies=[Depends(get_current_user)])
-
-
-@router_users.get("/roles")
-async def get_roles(_admin: UserModel = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    return await list_roles(db)
-
-
-@router_users.get("/users")
-async def get_users(_admin: UserModel = Depends(require_admin), db: AsyncSession = Depends(get_db)):
-    return await list_users(db)
+router_users = APIRouter()
 
 
-@router_users.post("/users", status_code=status.HTTP_200_OK)
-async def post_user(
-    request: UserCreateRequest,
-    background_tasks: BackgroundTasks,
-    admin: UserModel = Depends(require_admin),
+@router_users.post("/user/auth/google/login")
+@limiter.limit(LOGIN_RATE_LIMIT)
+async def login_con_google(
+    payload: GoogleAuthRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    user, rol, admin_emails = await create_user( request, db )
-
-    if mail_configured():
-        # Se envía después de responder: invitación al usuario + aviso a los admins.
-        background_tasks.add_task(
-            send_user_created_emails,
-            user.email,
-            role_label_of(rol),
-            str(admin.email) or "un administrador",
-            admin_emails,
-        )
-
-    return { "status": "ok" }
+    # Las HTTPException (401/403/500) del controller suben tal cual;
+    # cualquier otro error lo maneja FastAPI como 500.
+    return await verify_auth_google(payload.id_token, db, request)
 
 
-@router_users.get("/users/{user_id}")
-async def get_user_by_id(
+@router_users.post("/user/auth/logout")
+async def logout(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await auth_service.logout(db, current_user, request)
+
+
+@router_users.get("/user/me", response_model=CurrentUser)
+async def get_me(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    return current_user
+
+
+@router_users.get("/user/roles", response_model=list[RoleOut])
+async def get_roles(
+    _: CurrentUser = Depends(require_roles(ADMIN_ROLE)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await user_service.list_roles(db)
+
+
+@router_users.get("/user", response_model=PaginatedUsers)
+async def get_users(
+    _: CurrentUser = Depends(require_roles(ADMIN_ROLE)),
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    search: str | None = Query(default=None, max_length=255),
+    role_id: uuid.UUID | None = None,
+    is_active: bool | None = None,
+):
+    return await user_service.list_users(
+        db,
+        limit=limit,
+        offset=offset,
+        search=search,
+        role_id=role_id,
+        is_active=is_active,
+    )
+
+
+@router_users.post(
+    "/user",
+    response_model=UserOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_user(
+    payload: UserCreate,
+    request: Request,
+    current_user: CurrentUser = Depends(require_roles(ADMIN_ROLE)),
+    db: AsyncSession = Depends(get_db),
+):
+    return await user_service.create_user(
+        db, payload, current_user, request=request
+    )
+
+
+@router_users.get("/user/{user_id}", response_model=UserOut)
+async def get_user(
     user_id: uuid.UUID,
-    _admin: UserModel = Depends(require_admin),
+    _: CurrentUser = Depends(require_roles(ADMIN_ROLE)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await get_user( user_id, db )
+    return await user_service.get_user(db, user_id)
 
 
-@router_users.patch("/users/{user_id}")
-async def patch_user(
+@router_users.patch("/user/{user_id}", response_model=UserOut)
+async def update_user(
     user_id: uuid.UUID,
-    request: UserUpdateRequest,
-    admin: UserModel = Depends(require_admin),
+    payload: UserUpdate,
+    request: Request,
+    current_user: CurrentUser = Depends(require_roles(ADMIN_ROLE)),
     db: AsyncSession = Depends(get_db),
 ):
-    return await update_user( user_id, request, admin, db )
-
+    return await user_service.update_user(
+        db, user_id, payload, current_user, request=request
+    )

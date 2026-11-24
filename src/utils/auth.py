@@ -1,101 +1,147 @@
 import os
-import unicodedata
-import uuid
 import secrets
+import string
+from uuid import UUID
+
 from dotenv import load_dotenv
-from fastapi import Depends, HTTPException, status, Header
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
+
 from src.config.db import get_db
 from src.model.user import UserModel
+from src.schema.user import CurrentUser
+from src.utils.audit import record_audit_standalone
 from src.utils.other import verify_token_acces
-import string
+from src.utils.roles import ALLOWED_ROLES
 
-# Inicializamos el "guardia de seguridad" de FastAPI
-security = HTTPBearer()
-
-ADMIN_ROLE = 'Administrador del Sistema'
+# auto_error=False para devolver 401 (y no 403) cuando falta el token.
+security = HTTPBearer(auto_error=False)
 
 
-def is_admin_role( rol_name: str | None ) -> bool:
-    # Acepta "admin_sistema" o nombres como "Administrador del Sistema".
-    if not rol_name:
-        return False
-    r = unicodedata.normalize( "NFD", rol_name )
-    r = "".join( c for c in r if unicodedata.category( c ) != "Mn" ).lower().strip()
-    return r == ADMIN_ROLE or r.startswith( "admin" )
+def _unauthorized() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="No autenticado",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
-async def verify_token_access_top( credentials: HTTPAuthorizationCredentials = Depends( security ) ):
-
-    token_limpio = credentials.credentials
-
-    payload = verify_token_acces( token_limpio )
-
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Error"
-        )
-
-    return payload
+def _forbidden() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="No autorizado",
+    )
 
 
-async def get_current_user( payload: dict = Depends( verify_token_access_top ), db: AsyncSession = Depends( get_db ) ):
+async def get_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: AsyncSession = Depends(get_db),
+) -> CurrentUser:
+    """Valida el JWT y devuelve el usuario actual desde la base de datos.
+
+    El rol se toma de la BD, no del token: si a un usuario le cambian el rol o
+    lo desactivan, el cambio aplica de inmediato.
+    """
+    if credentials is None:
+        raise _unauthorized()
 
     try:
-        user_id = uuid.UUID( str( payload.get( "sub" ) ) )
-    except ( ValueError, TypeError ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Error"
-        )
+        payload = verify_token_acces(credentials.credentials)
+    except HTTPException:
+        raise _unauthorized()
+    except Exception:
+        raise _unauthorized()
 
-    stmt = select( UserModel ).options( selectinload( UserModel.rol ) ).where( UserModel.id == user_id )
+    try:
+        user_id = UUID(str(payload.get("sub")))
+    except (ValueError, TypeError, AttributeError):
+        raise _unauthorized()
 
-    result = await db.execute( stmt )
-
+    statement = (
+        select(UserModel)
+        .options(joinedload(UserModel.rol))
+        .where(UserModel.id == user_id)
+    )
+    result = await db.execute(statement)
     user = result.scalar_one_or_none()
 
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Error"
-        )
+    if user is None:
+        raise _unauthorized()
+    try:
+        token_version = int(payload.get("ver", -1))
+    except (TypeError, ValueError):
+        raise _unauthorized()
+    if token_version != int(getattr(user, "token_version", 0) or 0):
+        raise _unauthorized()
+    if not bool(user.is_active):
+        # No revelar si el token corresponde a una cuenta desactivada.
+        raise _unauthorized()
+    if user.rol is None or user.rol.name not in ALLOWED_ROLES:
+        raise _forbidden()
 
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Error"
-        )
+    current_user = CurrentUser(
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        lastname=user.lastname,
+        is_active=bool(user.is_active),
+        id_rol=user.id_rol,
+        rol=user.rol.name,
+        create_at=getattr(user, "create_at", None),
+    )
 
-    return user
+    # Disponible para el middleware de auditoria.
+    request.state.user_id = str(current_user.id)
+    request.state.user_email = current_user.email
+    request.state.user_role = current_user.rol
+
+    return current_user
 
 
-async def require_admin( user: UserModel = Depends( get_current_user ) ):
+def require_roles(*roles: str):
+    """Dependencia que exige uno de los roles indicados."""
 
-    if not user.rol or not is_admin_role( user.rol.name ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Error"
-        )
+    async def checker(
+        request: Request,
+        current_user: CurrentUser = Depends(get_current_user),
+    ) -> CurrentUser:
+        if current_user.rol not in roles:
+            # SEC-205: deja un evento de negocio, no solo el HTTP del
+            # middleware. Sin PII; el actor se resuelve por user_id.
+            await record_audit_standalone(
+                entity="User",
+                action="rbac_denied",
+                entity_id=current_user.id,
+                user_id=current_user.id,
+                request=request,
+                outcome="denied",
+                status_code=403,
+                after={
+                    "reason": "role_not_allowed",
+                    "role": current_user.rol,
+                    "required_roles": list(roles),
+                },
+            )
+            raise _forbidden()
+        return current_user
 
-    return user
+    return checker
 
 
-async def verify_token_cron( token_cron: str = Header(...) ):
-
+async def verify_token_cron(token_cron: str | None = Header(default=None)):
     load_dotenv()
-    real_token_cron = os.getenv( "TOKEN_CRON" )
+    real_token_cron = os.getenv("TOKEN_CRON")
 
-    if not token_cron or not real_token_cron or not secrets.compare_digest( token_cron, real_token_cron ):
-        print( "invalid token" )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Error"
-        )
+    if (
+        not token_cron
+        or not real_token_cron
+        or not secrets.compare_digest(token_cron, real_token_cron)
+    ):
+        raise _unauthorized()
 
     return True
 
@@ -104,6 +150,10 @@ def generate_random_password(length: int = 30) -> str:
     alphabet = string.ascii_letters + string.digits + "!@#$%^&*-_"
     while True:
         pwd = "".join(secrets.choice(alphabet) for _ in range(length))
-        if (any(c.islower() for c in pwd) and any(c.isupper() for c in pwd)
-                and any(c.isdigit() for c in pwd) and any(c in "!@#$%^&*-_" for c in pwd)):
+        if (
+            any(c.islower() for c in pwd)
+            and any(c.isupper() for c in pwd)
+            and any(c.isdigit() for c in pwd)
+            and any(c in "!@#$%^&*-_" for c in pwd)
+        ):
             return pwd
