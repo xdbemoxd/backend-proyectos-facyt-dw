@@ -1,97 +1,79 @@
-import uuid
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, EmailStr
+from uuid import UUID
 
-class UserValidation( BaseModel ):
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+
+class UserValidation(BaseModel):
     email: str
     password: str
 
-class UserCreated( BaseModel ):
-    name:str
-    lastname:str
-    email:str
-    password:str | None
 
-class EmailRequestUser( BaseModel ):
+class UserCreated(BaseModel):
+    name: str
+    lastname: str
+    email: str
+    password: str | None
+
+
+class EmailRequestUser(BaseModel):
     email: EmailStr
 
-class GoogleAuthRequest( BaseModel ):
-    id_token: str
+
+class GoogleAuthRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id_token: str = Field(min_length=1, max_length=8192)
 
 
-class UserCreateRequest( BaseModel ):
-    # Solo correo y rol. Cualquier otro campo se rechaza (422).
-    model_config = ConfigDict( extra="forbid" )
+class RoleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
-    email: EmailStr
-    id_rol: uuid.UUID
-
-
-class UserUpdateRequest( BaseModel ):
-    # Solo rol y estado. El correo y el nombre no se editan aqui.
-    model_config = ConfigDict( extra="forbid" )
-
-    id_rol: uuid.UUID
-    is_active: bool
-
-
-# ---------------------------------------------------------------------------
-# Esquemas de entrada / salida del router de usuarios
-# ---------------------------------------------------------------------------
-
-class UserCreate( BaseModel ):
-    # Solo correo y rol. Cualquier otro campo se rechaza (422).
-    model_config = ConfigDict( extra="forbid" )
-
-    email: EmailStr
-    id_rol: uuid.UUID
-
-
-class UserUpdate( BaseModel ):
-    # Solo rol y estado.
-    model_config = ConfigDict( extra="forbid" )
-
-    id_rol: uuid.UUID
-    is_active: bool
-
-
-class RoleOut( BaseModel ):
-    model_config = ConfigDict( from_attributes=True )
-
-    id: uuid.UUID
+    id: UUID
     name: str
     description: str | None = None
 
 
-class UserOut( BaseModel ):
-    model_config = ConfigDict( from_attributes=True )
-
-    id: uuid.UUID
-    email: str
+class UserOut(BaseModel):
+    id: UUID
+    email: EmailStr
     name: str | None = None
     lastname: str | None = None
     is_active: bool
-    create_at: datetime | None = None
-    id_rol: uuid.UUID
-    rol: RoleOut | None = None
-
-
-class CurrentUser( BaseModel ):
-    """Usuario autenticado (lo devuelve get_current_user). `rol` es el nombre."""
-
-    id: uuid.UUID
-    email: str
-    name: str | None = None
-    lastname: str | None = None
-    is_active: bool
-    id_rol: uuid.UUID
-    rol: str
+    id_rol: UUID
+    rol: str | None = None
     create_at: datetime | None = None
 
 
-class PaginatedUsers( BaseModel ):
+class CurrentUser(UserOut):
+    """Usuario autenticado que devuelve `get_current_user`."""
+
+
+class UserCreate(BaseModel):
+    # `extra="forbid"`: evita mass assignment de campos internos
+    # (id, rol, email_verified, etc.) y devuelve 422 en vez de ignorarlos.
+    model_config = ConfigDict(extra="forbid")
+
+    email: EmailStr = Field(max_length=255)
+    name: str | None = Field(default=None, max_length=255)
+    lastname: str | None = Field(default=None, max_length=255)
+    id_rol: UUID
+    # Por defecto se pre-registra activo: solo el dueño de la cuenta de Google
+    # con este email puede completar el login.
+    is_active: bool = True
+
+
+class UserUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, max_length=255)
+    lastname: str | None = Field(default=None, max_length=255)
+    id_rol: UUID | None = None
+    is_active: bool | None = None
+
+
+class PaginatedUsers(BaseModel):
     items: list[UserOut]
     total: int
     limit: int
     offset: int
-

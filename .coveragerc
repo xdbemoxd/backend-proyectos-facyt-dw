@@ -1,0 +1,12 @@
+[run]
+# SQLAlchemy async ejecuta el cuerpo de las corrutinas dentro de greenlets
+# (greenlet_spawn). Sin esta opcion, coverage pierde el tracing despues del
+# primer `await` contra la BD y reporta como "no cubiertas" lineas que si se
+# ejecutaron. `thread` cubre `asyncio.to_thread` (validacion de Google).
+concurrency = greenlet, thread
+source = src
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:

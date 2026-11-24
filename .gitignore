@@ -222,3 +222,5 @@ __marimo__/
 # Credenciales de Gmail
 client_secret.json
 get_refresh_token.py
+# Frontend (repositorio separado)
+frontend-proyectos-facyt/

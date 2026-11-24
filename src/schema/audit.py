@@ -1,0 +1,49 @@
+from datetime import datetime
+from typing import Any
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict
+
+
+class AuditUserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    email: str
+    name: str | None = None
+    lastname: str | None = None
+
+
+class AuditLogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    timestamp: datetime
+    request_id: UUID | None = None
+    user_id: UUID | None = None
+    user_email: str | None = None
+    user: AuditUserOut | None = None
+    ip_address: str
+    method: str | None = None
+    path: str | None = None
+    status_code: int | None = None
+    user_agent: str | None = None
+    request_headers: dict[str, Any] | None = None
+    query_params: dict[str, Any] | None = None
+    duration_ms: int | None = None
+    entity: str
+    action: str
+    entity_id: str | None = None
+    outcome: str
+    error_code: str | None = None
+    error_detail: str | None = None
+    before_data: Any | None = None
+    after_data: Any | None = None
+
+
+class PaginatedAudit(BaseModel):
+    items: list[AuditLogOut]
+    total: int
+    limit: int
+    offset: int
+    counts: dict[str, int] = {}

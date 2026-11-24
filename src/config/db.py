@@ -1,29 +1,48 @@
 import os
 from uuid import uuid4
-from sqlalchemy.pool import NullPool
 from sqlalchemy import MetaData
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
+from sqlalchemy.pool import NullPool
 from dotenv import load_dotenv
 
 load_dotenv();
 
 #my data base 
 SQLALCHEMY_DATABASE_URL = os.getenv( "DATABASE_URL" );
-# Supabase pooler (pgbouncer, modo "transaction", puerto 6543) no soporta
-# prepared statements cacheados: se desactiva la cache y se usan nombres
-# unicos para que dos conexiones no choquen con "__asyncpg_stmt_1__".
-# NullPool: pgbouncer ya hace el pool; evita reutilizar conexiones viejas.
-engine = create_async_engine(
-    SQLALCHEMY_DATABASE_URL,
-    echo = False,
-    poolclass = NullPool,
-    connect_args = {
-        "statement_cache_size": 0,
-        "prepared_statement_cache_size": 0,
-        "prepared_statement_name_func": lambda: f"__asyncpg_{uuid4()}__",
-    },
-)
+
+if not SQLALCHEMY_DATABASE_URL:
+    raise RuntimeError("La variable de entorno DATABASE_URL no esta configurada")
+
+# Supabase/PgBouncer en modo transaccion (puerto 6543) no soporta prepared
+# statements de asyncpg. Desactivar el cache evita DuplicatePreparedStatement.
+connect_args = {}
+if SQLALCHEMY_DATABASE_URL.startswith("postgresql+asyncpg"):
+    connect_args["statement_cache_size"] = 0
+    # SQLAlchemy tambien prepara sentencias con nombre: sin cache y con
+    # nombres unicos para que dos conexiones del pooler no choquen.
+    connect_args["prepared_statement_cache_size"] = 0
+    connect_args["prepared_statement_name_func"] = lambda: f"__asyncpg_{uuid4()}__"
+
+engine_kwargs = {
+    "echo": False,
+    "pool_pre_ping": True,
+    "connect_args": connect_args,
+}
+
+# Las pruebas usan NullPool para no atar conexiones a un event loop que se
+# cierra entre tests. La aplicacion reutiliza conexiones (pool) para evitar
+# el costo de abrir una conexion nueva en cada request contra Supabase.
+if os.getenv("TEST_DATABASE_URL"):
+    engine_kwargs["poolclass"] = NullPool
+else:
+    engine_kwargs.update(
+        pool_size=5,
+        max_overflow=5,
+        pool_recycle=1800,
+    )
+
+engine = create_async_engine(SQLALCHEMY_DATABASE_URL, **engine_kwargs)
 
 
 #crete query engine

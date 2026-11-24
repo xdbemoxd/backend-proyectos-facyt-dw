@@ -44,7 +44,7 @@ async def logout(
     return await auth_service.logout(db, current_user, request)
 
 
-@router_users.get("/user/me", response_model=CurrentUser)
+@router_users.get("/user/me", response_model=UserOut)
 async def get_me(
     current_user: CurrentUser = Depends(get_current_user),
 ):
