@@ -32,6 +32,9 @@ async def register_page_view(
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # ``source="client"`` deja explicito que la ruta la declara el navegador:
+    # es un evento de navegacion, no una lectura verificada en el servidor. El
+    # actor, la IP y el user-agent si se derivan del JWT y de la request.
     await record_audit(
         db,
         entity="Navigation",
@@ -41,7 +44,7 @@ async def register_page_view(
         http_method="GET",
         http_path=payload.path,
         status_code=status.HTTP_200_OK,
-        after={"path": payload.path},
+        after={"path": payload.path, "source": "client"},
     )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

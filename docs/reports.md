@@ -120,6 +120,10 @@ Cada exportación registra un evento append-only en `audit_log`:
 No se guardan tokens, contraseñas ni datos personales innecesarios. La IP y el
 usuario se resuelven con la misma infraestructura que el resto de la auditoría.
 
+La exportación es **fail-closed**: si `record_audit` o el `commit` fallan, el
+archivo no se entrega y el endpoint responde `503`. Solo se registra el tipo de
+excepción, nunca el contenido del reporte ni datos del usuario.
+
 ## Ejemplos
 
 ```bash

@@ -24,6 +24,11 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
 
+# Clave de prueba valida (>= 32 bytes y sin placeholders). Se define antes de
+# importar la app para no depender del .env ni de una clave real.
+os.environ.setdefault(
+    "SECRET_KEY", "pytest-facyt-secret-key-0123456789abcdef"
+)
 # Las pruebas consultan audit_log inmediatamente despues del response.
 os.environ.setdefault("AUDIT_SYNC_WRITES", "true")
 # Limite deterministico para el test de fuerza bruta, independiente del .env.

@@ -1143,8 +1143,9 @@ async def export_report(
         report_type, report_format, document.generated_at
     )
 
-    # Auditoría de negocio append-only. Si la escritura falla, se registra el
-    # incidente pero no se rompe la descarga ya generada.
+    # Auditoría fail-closed: una exportación sin constancia de quién la pidió
+    # no debe entregarse. Si falla el registro o el commit, se descarta el
+    # archivo y se responde 503 (no se loguean datos del reporte).
     try:
         await record_audit(
             db,
@@ -1165,13 +1166,24 @@ async def export_report(
         )
         await db.commit()
     except Exception as exc:  # pragma: no cover - depende de la BD
-        await db.rollback()
+        try:
+            await db.rollback()
+        except Exception:  # pragma: no cover - defensivo
+            pass
         logger.error(
-            "No se pudo auditar la exportación %s.%s (%s)",
+            "No se pudo auditar la exportación %s.%s (%s); se rechaza la "
+            "descarga",
             report_type,
             report_format,
             type(exc).__name__,
         )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "No se pudo registrar la exportación. "
+                "Inténtalo de nuevo más tarde"
+            ),
+        ) from exc
 
     return RenderedReport(
         content=content,

@@ -145,6 +145,12 @@ cp .env.example .env
 | `LOGIN_RATE_LIMIT` | No | Límite del login; default `10/minute` |
 | `TRUST_PROXY_HEADERS` | No | `true` solo detrás de un proxy confiable |
 | `AUDIT_HTTP_ALL` | No | `true` audita también todos los GET exitosos |
+| `AUDIT_SYNC_WRITES` | No | `true` fuerza escritura síncrona (solo pruebas); default `false` |
+| `AUDIT_QUEUE_MAXSIZE` | No | Tamaño de la cola en memoria; default `10000` |
+| `AUDIT_WORKER_CONCURRENCY` | No | Workers de persistencia; default `2` |
+| `AUDIT_BATCH_SIZE` | No | Eventos por commit del worker; default `50` |
+| `AUDIT_WRITE_RETRIES` | No | Reintentos de persistencia de auditoría; default `2` |
+| `AUDIT_RETRY_BACKOFF_MS` | No | Backoff base entre reintentos; default `200` |
 | `AUDIT_RETENTION_DAYS` | No | Retención operativa; default `365` |
 | `TOKEN_CRON` | No | Token para tareas programadas |
 | `TEST_DATABASE_URL` | No | Base aislada para pruebas de integración |
@@ -170,13 +176,16 @@ explícitamente.
 |---|---|---|
 | `POSTGRES_DB` | `proyectos_facyt` | Nombre de la base local |
 | `POSTGRES_USER` | `proyectos` | Usuario local |
-| `POSTGRES_PASSWORD` | `proyectos_local` | Contraseña local (solo dev) |
-| `POSTGRES_PORT` | `5432` | Puerto publicado del PostgreSQL local |
-| `BACKEND_PORT` | `8000` | Puerto publicado del backend |
-| `FRONTEND_PORT` | `3000` | Puerto publicado del frontend |
-| `AUTH_SECRET` / `NEXTAUTH_SECRET` | placeholders | NextAuth v5 (deben coincidir) |
+| `POSTGRES_PASSWORD` | **sin default** | Obligatoria; compose falla si falta |
+| `SECRET_KEY` | **sin default** | Obligatoria, ≥32 bytes; rechaza placeholders |
+| `AUTH_SECRET` / `NEXTAUTH_SECRET` | **sin default** | Obligatorias, ≥32 bytes (deben coincidir) |
+| `SEED_DEMO_DATA` | `true` | `false` salta `db/seeds` (sin datos ficticios) |
+| `FRONTEND_PORT` | `3000` | Único puerto publicado al host |
 | `AUTH_URL` / `NEXTAUTH_URL` | `http://localhost:3000` | URL pública del frontend |
 | `NEXT_PUBLIC_ALLOWED_EMAIL_DOMAIN` | vacío | Dominio validado en el formulario |
+
+PostgreSQL y el backend **no publican puertos**: el navegador solo habla con el
+frontend, que reenvía las llamadas al backend por la red interna de compose.
 
 ---
 
@@ -290,6 +299,10 @@ En Docker Compose esto es automático: el servicio `db-init` ejecuta
 | `trg_*_set_updated_at` | tablas con `updated_at` | Actualiza `updated_at` con `clock_timestamp()` |
 | `trg_expense_set_modifiet_at` | `expense_approval` | Actualiza `modifiet_at` |
 
+La migración `20261125_security_hardening.sql` añade además append-only en
+`audith_project`, `overhead_period` y `overhead_allocation`, y rechaza períodos
+de overhead solapados (`23P01`). No forma parte del esquema base.
+
 Los triggers de stock usan `SELECT ... FOR UPDATE`, por lo que dos despachos
 concurrentes no pueden dejar el stock negativo.
 
@@ -343,7 +356,10 @@ cambios posteriores se aplican con los archivos de `db/migrations/`.
 3. Aplica esquema y seeders.
 4. Comprueba stock, triggers, inmutabilidad, reservas, duplicados, UUID v7 e
    idempotencia.
-5. Hace `ROLLBACK` y confirma que el esquema temporal desapareció.
+5. Aplica también la migración de endurecimiento (sin `CONCURRENTLY`, porque
+   corre dentro de la transacción) y verifica índices, triggers append-only y
+   solape de overhead.
+6. Hace `ROLLBACK` y confirma que el esquema temporal desapareció.
 
 ```bash
 .venv/Scripts/python.exe db/scripts/verify_schema.py
@@ -364,6 +380,11 @@ esquema anterior:
    append-only de `audit_log`.
 2. `20261123_add_token_version.sql` — `user.token_version`.
 3. `20261123_audit_owner.sql` — separación de propiedad de `audit_log`.
+4. `20261125_security_hardening.sql` — UNIQUE normalizados de material y serial
+   de equipo, append-only de `audith_project`/overhead y bloqueo de períodos
+   solapados. Usa `CREATE INDEX CONCURRENTLY`: ejecutar en autocommit (psql),
+   no dentro de una transacción. Falla con mensaje claro si hay duplicados y no
+   borra datos.
 
 En una instalación nueva **no** hace falta ejecutarlas: `db/schema/` ya incluye
 su estado final. `sql/` es legado y no debe ejecutarse.
@@ -437,12 +458,12 @@ docker compose up --build
 
 Servicios:
 
-| Servicio | URL local | Notas |
+| Servicio | Acceso local | Notas |
 |---|---|---|
-| `db` | `localhost:5432` | PostgreSQL 16, volumen `proyectos-facyt-pgdata` |
-| `db-init` | — | Aplica esquema + seeders y termina |
-| `backend` | http://localhost:8000 | FastAPI/Uvicorn |
-| `frontend` | http://localhost:3000 | Next.js |
+| `db` | solo red interna (`db:5432`) | PostgreSQL 16, volumen `proyectos-facyt-pgdata` |
+| `db-init` | — | Aplica esquema + seeders (si `SEED_DEMO_DATA=true`) y termina |
+| `backend` | solo red interna (`backend:8000`) | FastAPI/Uvicorn |
+| `frontend` | http://localhost:3000 | Next.js, único puerto publicado |
 
 El frontend se construye desde `../frontend-proyectos-facyt`. Si mueves el
 `docker-compose.yml`, ajusta `frontend.build.context`.
@@ -453,9 +474,13 @@ Comandos útiles:
 docker compose ps
 docker compose logs -f backend
 docker compose exec db psql -U proyectos -d proyectos_facyt -c '\dt private.*'
+docker compose exec backend python -c "import app; print('ok')"
 docker compose down            # conserva el volumen
 docker compose down -v         # borra la base local (destructivo)
 ```
+
+Para depurar desde el host, usa `docker compose exec` o un túnel SSH. No
+descomentes `ports` en `db`/`backend` en un entorno compartido.
 
 Para producción:
 
@@ -514,8 +539,19 @@ Ver también `tests/README.md` y `docs/testing/`.
 - Rate limit global y específico en login.
 - CORS restringido por origen; no se usa `*` con credenciales.
 - Errores genéricos: sin trazas, SQL ni rutas internas.
+- `SECRET_KEY` se valida una sola vez al importar: rechaza placeholders y
+  claves de menos de 32 bytes (el arranque falla; no hay coste por request).
 - Auditoría redacta `Authorization`, `Cookie`, `Set-Cookie` y `X-Api-Key`.
-- `audit_log`, `dispatch_log` y los lotes son append-only por triggers.
+  Las excepciones no guardan su mensaje: solo tipo + `request_id`.
+- La escritura de auditoría HTTP es no bloqueante (cola acotada + worker con
+  reintentos y drenaje en shutdown). Las lecturas de `/api/audit`,
+  `/api/audit/users` y `/api/user` quedan registradas sin consultas extra.
+- La exportación de reportes es fail-closed: si no se puede auditar, responde
+  `503` y no entrega el archivo.
+- Un coordinador solo edita `name`/`description`; estado, progreso y ejecución
+  presupuestaria son exclusivos del administrador (`403` si los envía).
+- `audit_log`, `dispatch_log`, lotes y (con la migración de endurecimiento)
+  `audith_project`/overhead son append-only por triggers.
 - El contenedor corre con usuario no privilegiado (`appuser`).
 - `.dockerignore` excluye `.env`, `.git`, `.venv`, tests y docs.
 
@@ -529,19 +565,20 @@ contraseña de la base y el `GOOGLE_CLIENT_SECRET`.
 1. **Endpoints de negocio pendientes.** Los modelos y triggers existen, pero no
    hay servicios/CRUD de proyectos, inventario, despachos, equipos, solicitudes
    ni overhead.
-2. **`dispatch_log` no referencia una solicitud de gasto.** El modelo actual no
-   tiene `id_expense_approval`, por lo que la base no puede impedir por sí sola
-   un despacho sin solicitud `Aprobada`. Esa validación debe vivir en el
-   servicio cuando se implemente RF-5.
+2. **`dispatch_log` no referencia una solicitud de gasto (pendiente).** El
+   modelo actual no tiene `id_expense_approval`, por lo que la base no puede
+   impedir por sí sola un despacho sin solicitud `Aprobada`. Esa validación
+   debe vivir en el servicio cuando se implemente RF-5; no forma parte de este
+   endurecimiento.
 3. **La suma del overhead no está impuesta por la BD.** El seed la cumple y el
    script de verificación la comprueba, pero no hay un constraint diferido que
    la obligue en cada cierre. Debe validarse en el servicio transaccional.
 4. **La reserva no cambia el estado del equipo.** El trigger impide solapes,
    pero no marca la unidad como `En uso` ni la libera; eso corresponde al
    servicio.
-5. **No hay constraint de unicidad de período de overhead por rango.** Solo se
-   evita el duplicado exacto período/proyecto en asignaciones. Falta definir la
-   política de períodos solapados.
+5. **Solape de períodos de overhead.** El esquema base no lo impedía. La
+   migración `20261125_security_hardening.sql` lo bloquea con un trigger, pero
+   el rediseño del cierre de overhead sigue pendiente (no se implementó aquí).
 6. **El esquema de la base real de Supabase no tiene todos los CHECK del
    modelo.** En particular faltan `ck_project_progress` y
    `ck_project_budget_execution` en la base existente; los scripts nuevos sí

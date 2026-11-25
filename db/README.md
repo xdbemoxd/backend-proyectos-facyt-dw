@@ -198,9 +198,13 @@ Pasos:
    - Reservas solapadas rechazadas y contiguas aceptadas.
    - Código de proyecto duplicado rechazado.
    - `updated_at`, UUID v7 e idempotencia de los seeders.
+   - Migración `20261125_security_hardening.sql`: índices UNIQUE normalizados,
+     append-only de `audith_project`/overhead y rechazo de períodos solapados.
+     La migración se ejecuta dos veces para probar idempotencia; dentro de la
+     transacción se omite `CONCURRENTLY` (en producción sí se usa).
 5. `ROLLBACK` + comprobación de que el esquema temporal desapareció.
 
-Salida esperada: `RESULTADO: 40 comprobaciones OK` y
+Salida esperada: `RESULTADO: 50 comprobaciones OK` (incluye la migración) y
 `ROLLBACK confirmado`.
 
 ---
@@ -215,6 +219,21 @@ Salida esperada: `RESULTADO: 40 comprobaciones OK` y
   `01_catalogs.sql`.
 - En una base existente, las tablas no se alteran. Los cambios se aplican con
   `db/migrations/`.
+
+### Migración de endurecimiento (2026-11-25)
+
+`db/migrations/20261125_security_hardening.sql` añade:
+
+- UNIQUE de `raw_material(lower(btrim(name)))`.
+- UNIQUE de `equipament_supplier(lower(btrim(serial_number)))` donde el serial
+  no es nulo.
+- Append-only (`UPDATE`/`DELETE`/`TRUNCATE`) en `audith_project`,
+  `overhead_period` y `overhead_allocation`.
+- Trigger que rechaza períodos de overhead solapados.
+
+Ejecutar en autocommit porque usa `CREATE INDEX CONCURRENTLY` (no dentro de una
+transacción). Si hay duplicados aborta con un mensaje claro y **no borra
+datos**. No se aplica automáticamente desde `init_db.sh`.
 
 ### Diferencias conocidas con la base real de Supabase
 

@@ -9,19 +9,91 @@ from fastapi import HTTPException, status
 
 load_dotenv()
 
-#JWT data
-SECRET_KEY: str = os.environ["SECRET_KEY"]
+logger = logging.getLogger(__name__)
 
-if not SECRET_KEY:
-    raise RuntimeError("La variable de entorno SECRET_KEY no está configurada")
+# Longitud minima recomendada para HMAC-SHA256. Se valida en bytes UTF-8.
+SECRET_KEY_MIN_BYTES = 32
+
+# Valores exactos que aparecen en ejemplos, compose y documentacion. Nunca
+# deben llegar a un entorno real: son publicos.
+_PLACEHOLDER_SECRETS = frozenset(
+    {
+        "reemplazar-por-un-secreto-largo-y-aleatorio",
+        "local-dev-only-change-me-32-chars-minimum",
+        "change-me",
+        "change_me",
+        "changeme",
+        "default",
+        "default-secret",
+        "dev",
+        "dev-secret",
+        "development",
+        "development-secret",
+        "dummy",
+        "example",
+        "example-secret",
+        "insecure",
+        "password",
+        "placeholder",
+        "secret",
+        "secret-key",
+        "supersecret",
+        "test",
+        "test-secret",
+        "your-secret",
+        "your-secret-key",
+        "your_secret_key",
+    }
+)
+
+# Fragmentos que delatan un secreto de ejemplo aunque el valor exacto cambie.
+_PLACEHOLDER_SECRET_PATTERNS = (
+    "change-me",
+    "change_me",
+    "changeme",
+    "example-secret",
+    "local-dev-only",
+    "placeholder",
+    "reemplazar",
+    "your-secret",
+    "your_secret",
+)
+
+
+def validate_secret_key(secret: str | None) -> None:
+    """Valida ``SECRET_KEY`` una sola vez, al importar el modulo.
+
+    No se llama por request: cualquier error aqui aborta el arranque, que es
+    justo lo que se quiere en produccion. El mensaje nunca incluye el valor.
+    """
+    if not secret or not secret.strip():
+        raise RuntimeError(
+            "La variable de entorno SECRET_KEY no está configurada"
+        )
+    if len(secret.encode("utf-8")) < SECRET_KEY_MIN_BYTES:
+        raise RuntimeError(
+            "SECRET_KEY debe tener al menos "
+            f"{SECRET_KEY_MIN_BYTES} bytes (UTF-8)"
+        )
+    normalized = secret.strip().lower()
+    if normalized in _PLACEHOLDER_SECRETS or any(
+        pattern in normalized for pattern in _PLACEHOLDER_SECRET_PATTERNS
+    ):
+        raise RuntimeError(
+            "SECRET_KEY usa un valor placeholder conocido o de ejemplo. "
+            "Genera una clave aleatoria de al menos 32 bytes"
+        )
+
+
+# JWT data
+SECRET_KEY: str = os.getenv("SECRET_KEY", "")
+validate_secret_key(SECRET_KEY)
 
 ALGORITHM = "HS256"
 JWT_ISSUER = os.getenv("JWT_ISSUER", "proyectos-facyt-api")
 JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "proyectos-facyt-frontend")
 JWT_ACCESS_TTL_MINUTES = int(os.getenv("JWT_ACCESS_TTL_MINUTES", "60"))
 
-
-logger = logging.getLogger(__name__)
 
 def encode( string : str ):
 

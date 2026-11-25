@@ -1,5 +1,6 @@
 import json
 import os
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 
@@ -16,7 +17,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.config.rate_limit import limiter
-from src.middleware.audit import AuditMiddleware
+from src.middleware.audit import AuditMiddleware, drain_audit_queue
 from src.middleware.security_headers import SecurityHeadersMiddleware
 from src.router.audit import router_audit
 from src.router.equipment import router_equipment
@@ -41,12 +42,20 @@ docs_enabled = (
 # ---------------------------------------------------------------------------
 # Aplicacion
 # ---------------------------------------------------------------------------
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Drena la auditoria pendiente antes de apagar el proceso."""
+    yield
+    await drain_audit_queue()
+
+
 app = FastAPI(
     title="Sistema de Control de Proyectos y Recursos",
     version="0.1.0",
     docs_url="/docs" if docs_enabled else None,
     redoc_url="/redoc" if docs_enabled else None,
     openapi_url="/openapi.json" if docs_enabled else None,
+    lifespan=lifespan,
 )
 
 app.state.limiter = limiter

@@ -124,6 +124,25 @@ def can_edit_project(role: str | None) -> bool:
     return role in (ADMIN_ROLE, COORDINATOR_ROLE)
 
 
+# Campos que un coordinador NO puede modificar por PATCH. El estado, el avance
+# y la ejecucion presupuestaria los controla el administrador; confiar en que
+# el frontend los oculte seria mass assignment.
+COORDINATOR_FORBIDDEN_UPDATE_FIELDS = (
+    "id_status",
+    "progress",
+    "budget_execution",
+)
+
+
+def coordinator_forbidden_fields(updates: dict) -> list[str]:
+    """Devuelve los campos restringidos presentes en un PATCH de coordinador."""
+    return [
+        field
+        for field in COORDINATOR_FORBIDDEN_UPDATE_FIELDS
+        if field in updates
+    ]
+
+
 def can_change_priority(role: str | None) -> bool:
     """Solo administrador y aprobador cambian prioridad (RN-3)."""
     return role in (ADMIN_ROLE, APPROVER_ROLE)
@@ -366,6 +385,22 @@ async def update_project(
             detail="No autorizado",
         )
 
+    updates = payload.model_dump(exclude_unset=True)
+    updates.pop("expected_updated_at", None)
+
+    # Se valida antes de tocar la BD: un coordinador solo edita nombre y
+    # descripcion, aunque envie el campo con el mismo valor actual.
+    if actor.rol == COORDINATOR_ROLE:
+        forbidden = coordinator_forbidden_fields(updates)
+        if forbidden:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Un coordinador solo puede editar el nombre y la "
+                    "descripción del proyecto"
+                ),
+            )
+
     project = await _get_project_for_actor(db, project_id, actor, lock=True)
 
     if is_project_locked(project):
@@ -383,8 +418,6 @@ async def update_project(
             ),
         )
 
-    updates = payload.model_dump(exclude_unset=True)
-    updates.pop("expected_updated_at", None)
     if not updates:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -495,6 +528,13 @@ async def change_priority(
         )
 
     project = await _get_project_for_actor(db, project_id, actor, lock=True)
+
+    # Un proyecto finalizado es terminal: no se reabre ni se reprioriza.
+    if is_project_locked(project):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Un proyecto finalizado no se puede modificar",
+        )
 
     new_priority = await db.get(PriorityProjectModel, payload.id_priority)
     if new_priority is None:

@@ -257,7 +257,28 @@ async def test_middleware_audits_unhandled_exception():
     assert row.status_code == 500
     assert row.outcome == "failed"
     assert row.error_code == "RuntimeError"
-    assert "fallo controlado" in row.error_detail
+    # Solo tipo de excepcion + request_id: nunca el mensaje interno.
+    assert row.error_detail == f"RuntimeError; request_id={row.request_id}"
+    assert "fallo controlado" not in (row.error_detail or "")
+
+
+@pytest.mark.asyncio
+async def test_sensitive_get_is_audited_but_me_is_not(client, admin_token):
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    listing = await client.get("/api/user", headers=headers)
+    assert listing.status_code == 200, listing.text
+    row = await get_audit(listing.headers["x-request-id"])
+    assert row is not None
+    assert row.method == "GET"
+    assert row.path == "/api/user"
+    assert row.status_code == 200
+    assert row.outcome == "success"
+
+    # /api/user/me no es una lectura sensible y no debe generar ruido.
+    me = await client.get("/api/user/me", headers=headers)
+    assert me.status_code == 200, me.text
+    assert await get_audit(me.headers["x-request-id"]) is None
 
 
 @pytest.mark.asyncio

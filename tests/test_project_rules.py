@@ -291,6 +291,131 @@ async def test_approver_cannot_update_project_data(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("id_status", 2),
+        ("progress", 50),
+        ("budget_execution", 50),
+    ],
+)
+async def test_coordinator_cannot_patch_restricted_fields(
+    monkeypatch, field, value
+):
+    project = make_project()
+    actor = make_actor(COORDINATOR_ROLE)
+    called = False
+
+    async def fake_get(db, project_id, current_user, **kwargs):  # noqa: ARG001
+        nonlocal called
+        called = True
+        return project
+
+    monkeypatch.setattr(
+        project_service, "_get_project_for_actor", fake_get
+    )
+
+    payload = ProjectUpdate(
+        expected_updated_at=NOW, **{field: value}
+    )
+    with pytest.raises(HTTPException) as exc:
+        await project_service.update_project(
+            None,  # type: ignore[arg-type]
+            project.id,
+            payload,
+            actor,
+        )
+    assert exc.value.status_code == 403
+    assert "nombre y la descripción" in exc.value.detail
+    # Se rechaza antes de consultar la base (sin trabajo extra).
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_coordinator_can_patch_name_and_description(monkeypatch):
+    project = make_project()
+    actor = make_actor(COORDINATOR_ROLE)
+    db = FakeSession()
+
+    async def fake_get(session, project_id, current_user, **kwargs):  # noqa: ARG001
+        return project
+
+    async def fake_record_audit(session, **kwargs):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(
+        project_service, "_get_project_for_actor", fake_get
+    )
+    monkeypatch.setattr(project_service, "record_audit", fake_record_audit)
+
+    result = await project_service.update_project(
+        db,
+        project.id,
+        ProjectUpdate(
+            expected_updated_at=NOW,
+            name="Nombre permitido",
+            description="Descripción permitida",
+        ),
+        actor,
+    )
+
+    assert result.name == "Nombre permitido"
+    assert result.description == "Descripción permitida"
+    assert db.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_can_patch_progress(monkeypatch):
+    project = make_project()
+    actor = make_actor(ADMIN_ROLE)
+    db = FakeSession()
+
+    async def fake_get(session, project_id, current_user, **kwargs):  # noqa: ARG001
+        return project
+
+    async def fake_record_audit(session, **kwargs):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(
+        project_service, "_get_project_for_actor", fake_get
+    )
+    monkeypatch.setattr(project_service, "record_audit", fake_record_audit)
+
+    result = await project_service.update_project(
+        db,
+        project.id,
+        ProjectUpdate(expected_updated_at=NOW, progress=75),
+        actor,
+    )
+
+    assert result.progress == 75.0
+    assert db.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_finalized_project_cannot_change_priority(monkeypatch):
+    project = make_project(status_name="Finalizado", id_status=4)
+    actor = make_actor(APPROVER_ROLE)
+
+    async def fake_get(db, project_id, current_user, **kwargs):  # noqa: ARG001
+        return project
+
+    monkeypatch.setattr(
+        project_service, "_get_project_for_actor", fake_get
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await project_service.change_priority(
+            None,  # type: ignore[arg-type]
+            project.id,
+            PriorityChangeIn(id_priority=1, explaining="motivo válido"),
+            actor,
+        )
+    assert exc.value.status_code == 409
+    assert "finalizado" in exc.value.detail.lower()
+
+
+@pytest.mark.asyncio
 async def test_coordinator_cannot_change_priority(monkeypatch):
     project = make_project()
     actor = make_actor(COORDINATOR_ROLE)

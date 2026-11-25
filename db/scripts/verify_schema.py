@@ -31,6 +31,8 @@ from dotenv import dotenv_values
 
 DB_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = DB_DIR.parent
+MIGRATIONS_DIR = DB_DIR / "migrations"
+SECURITY_MIGRATION = MIGRATIONS_DIR / "20261125_security_hardening.sql"
 
 
 def _database_url(cli_value: str | None) -> str:
@@ -534,7 +536,145 @@ async def run_checks(conn: asyncpg.Connection, schema: str) -> None:
                  .replace("private.", f'"{schema}".'))
     c.ok("99_verify.sql ejecutado sin errores", True)
 
+    await run_migration_checks(conn, schema, c)
+
     print(f"\nRESULTADO: {c.passed} comprobaciones OK")
+
+
+def _migration_sql(path: Path, schema: str) -> str:
+    """Carga una migracion para el esquema temporal.
+
+    ``CREATE INDEX CONCURRENTLY`` no puede ejecutarse dentro de la transaccion
+    que este script usa para el ROLLBACK final. En produccion la migracion SI
+    conserva CONCURRENTLY (ver el archivo); aqui solo se valida su DDL.
+    """
+    sql = _read_for_schema(path, schema)
+    return sql.replace("CONCURRENTLY ", "")
+
+
+async def run_migration_checks(
+    conn: asyncpg.Connection, schema: str, c: Checker
+) -> None:
+    """Valida la migracion de endurecimiento dentro del esquema temporal."""
+    print("\n[10/10] Migracion 20261125_security_hardening.sql (idempotente)")
+
+    if not SECURITY_MIGRATION.exists():
+        raise AssertionError(f"No existe {SECURITY_MIGRATION}")
+
+    migration = _migration_sql(SECURITY_MIGRATION, schema)
+    # Dos ejecuciones: valida idempotencia de indices y triggers.
+    await conn.execute(migration)
+    await conn.execute(migration)
+
+    await c.eq(
+        "indice UNIQUE de raw_material normalizado",
+        """
+        SELECT count(*) FROM pg_indexes
+         WHERE schemaname = 'private'
+           AND indexname = 'uq_raw_material_name_normalized'
+        """,
+        1,
+    )
+    await c.eq(
+        "indice UNIQUE de serial normalizado",
+        """
+        SELECT count(*) FROM pg_indexes
+         WHERE schemaname = 'private'
+           AND indexname = 'uq_equipament_supplier_serial_normalized'
+        """,
+        1,
+    )
+    await c.eq(
+        "triggers append-only y de solape creados",
+        """
+        SELECT count(*)
+          FROM pg_trigger t
+          JOIN pg_class cl ON cl.oid = t.tgrelid
+          JOIN pg_namespace n ON n.oid = cl.relnamespace
+         WHERE n.nspname = 'private'
+           AND t.tgname IN (
+               'trg_audith_project_append_only',
+               'trg_audith_project_no_truncate',
+               'trg_overhead_period_append_only',
+               'trg_overhead_period_no_truncate',
+               'trg_overhead_allocation_append_only',
+               'trg_overhead_allocation_no_truncate',
+               'trg_overhead_period_no_overlap'
+           )
+        """,
+        7,
+    )
+
+    await c.expect_error(
+        "audith_project rechaza UPDATE",
+        "UPDATE private.audith_project SET explaining = 'alterado'",
+        "23000",
+    )
+    await c.expect_error(
+        "overhead_period rechaza DELETE",
+        "DELETE FROM private.overhead_period",
+        "23000",
+    )
+    await c.expect_error(
+        "overhead_allocation rechaza TRUNCATE",
+        "TRUNCATE private.overhead_allocation",
+        "23000",
+    )
+    await c.expect_error(
+        "nombre de material duplicado rechazado",
+        """
+        INSERT INTO private.raw_material
+            (id_inventroy, name, description, resource_type_id, unit)
+        SELECT private.uuid_generate_v7(), '  ' || upper(rm.name) || '  ',
+               NULL, rm.resource_type_id, rm.unit
+          FROM private.raw_material rm
+         ORDER BY rm.name
+         LIMIT 1
+        """,
+        "23505",
+    )
+    await c.expect_error(
+        "serial de equipo duplicado rechazado",
+        """
+        INSERT INTO private.equipament_supplier
+            (id, id_equipament, id_vendors, id_status, model, serial_number)
+        SELECT private.uuid_generate_v7(), es.id_equipament, es.id_vendors,
+               es.id_status, es.model, lower(es.serial_number)
+          FROM private.equipament_supplier es
+         WHERE es.serial_number = 'SN-EQ-0001'
+        """,
+        "23505",
+    )
+    await c.expect_error(
+        "periodo de overhead solapado rechazado",
+        """
+        INSERT INTO private.overhead_period
+            (id, start_date, end_date, criterion, total_cost, closed_by)
+        SELECT private.uuid_generate_v7(), DATE '2026-10-15',
+               DATE '2026-10-20', 'proporcional', 100.00, u.id
+          FROM private."user" u
+         WHERE u.email = 'admin@example.com'
+        """,
+        "23P01",
+    )
+    await c.exec(
+        """
+        INSERT INTO private.overhead_period
+            (id, start_date, end_date, criterion, total_cost, closed_by)
+        SELECT private.uuid_generate_v7(), DATE '2026-11-01',
+               DATE '2026-11-30', 'equitativo', 100.00, u.id
+          FROM private."user" u
+         WHERE u.email = 'admin@example.com'
+        """
+    )
+    await c.eq(
+        "periodo contiguo aceptado",
+        """
+        SELECT count(*) FROM private.overhead_period
+         WHERE start_date = DATE '2026-11-01'
+        """,
+        1,
+    )
 
 
 async def main() -> int:

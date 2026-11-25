@@ -71,6 +71,17 @@ _EXCLUDED_PATHS = {
     "/openapi.json",
 }
 
+# Lecturas de datos sensibles que deben quedar registradas aunque el GET sea
+# exitoso. Se comparan por ruta exacta (sin prefijos) para no auditar de mas:
+# un GET masivo a /api/projects no entra aqui. No generan consultas extra.
+_SENSITIVE_READ_PATHS = frozenset(
+    {
+        "/api/audit",
+        "/api/audit/users",
+        "/api/user",
+    }
+)
+
 _HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 
 
@@ -210,7 +221,8 @@ def should_audit_request(method: str, path: str, status_code: int) -> bool:
     """Evita ruido de health/docs y audita lo relevante.
 
     - Siempre: mutaciones (POST/PUT/PATCH/DELETE), auth y errores.
-    - GET/HEAD/OPTIONS: solo auth, errores o si AUDIT_HTTP_ALL=true.
+    - GET/HEAD/OPTIONS: auth, errores, lecturas sensibles exactas (auditoria,
+      listado de usuarios) o si AUDIT_HTTP_ALL=true.
     """
     if path in _EXCLUDED_PATHS:
         return False
@@ -223,6 +235,8 @@ def should_audit_request(method: str, path: str, status_code: int) -> bool:
     if path.startswith("/api/user/auth/"):
         return True
     if status_code >= 400:
+        return True
+    if method.upper() in {"GET", "HEAD"} and path in _SENSITIVE_READ_PATHS:
         return True
     return os.getenv("AUDIT_HTTP_ALL", "false").lower() in ("1", "true", "yes")
 
@@ -269,15 +283,29 @@ def build_http_audit_data(
     }
 
 
+async def _persist_http_audit(data: dict[str, Any]) -> None:
+    """Escribe la fila HTTP y propaga el error (para reintentos del worker)."""
+    async with AsyncSessionLocal() as db:
+        db.add(AuditLogModel(**data))
+        await db.commit()
+
+
+async def _persist_http_audit_batch(data_list: list[dict[str, Any]]) -> None:
+    """Escribe varias filas HTTP en una sola transaccion (menos commits)."""
+    if not data_list:
+        return
+    async with AsyncSessionLocal() as db:
+        db.add_all([AuditLogModel(**data) for data in data_list])
+        await db.commit()
+
+
 async def write_http_audit(data: dict[str, Any]) -> None:
     """Persiste una fila HTTP en una sesion independiente.
 
     Nunca propaga errores: la auditoria no debe tumbar la request.
     """
     try:
-        async with AsyncSessionLocal() as db:
-            db.add(AuditLogModel(**data))
-            await db.commit()
+        await _persist_http_audit(data)
     except Exception as exc:  # pragma: no cover - depende de la BD
         logger.error("No se pudo escribir audit_log HTTP: %s", type(exc).__name__)
 

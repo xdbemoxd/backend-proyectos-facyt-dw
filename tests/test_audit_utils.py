@@ -100,7 +100,15 @@ def test_should_audit_request(monkeypatch):
     assert should_audit_request("GET", "/", 200) is False
     assert should_audit_request("POST", "/api/audit/pageview", 204) is False
     assert should_audit_request("POST", "/api/audit/pageview", 401) is True
-    assert should_audit_request("GET", "/api/audit", 200) is False
+    # Lecturas sensibles exactas: quedan registradas aunque el GET sea 200.
+    assert should_audit_request("GET", "/api/audit", 200) is True
+    assert should_audit_request("GET", "/api/audit/users", 200) is True
+    assert should_audit_request("GET", "/api/user", 200) is True
+    # No se generaliza a subrutas ni a listados no sensibles.
+    assert should_audit_request("GET", "/api/user/me", 200) is False
+    assert should_audit_request("GET", "/api/user/roles", 200) is False
+    assert should_audit_request("GET", "/api/projects", 200) is False
+    assert should_audit_request("OPTIONS", "/api/audit", 200) is False
     assert should_audit_request("GET", "/api/audit", 401) is True
 
     monkeypatch.setenv("AUDIT_HTTP_ALL", "true")

@@ -24,7 +24,7 @@ Bitácora **append-only** de acciones de negocio y requests HTTP.
 | `entity_id` | `varchar(100)` | ID del recurso |
 | `outcome` | `varchar(20)` | `success`, `denied` o `failed` |
 | `error_code` | `varchar(100)` | `HTTP_<status>` o nombre de la excepción |
-| `error_detail` | `varchar(1000)` | Detalle acotado (sin credenciales) |
+| `error_detail` | `varchar(1000)` | Tipo de excepción + `request_id`; nunca `str(exc)` |
 | `before_data` | `jsonb` | Estado anterior |
 | `after_data` | `jsonb` | Estado nuevo |
 
@@ -61,17 +61,30 @@ los recrea al final.
 2. Medir la duración.
 3. Capturar método, path, query params, headers redactados, user-agent, IP y
    actor desde `request.state` o desde el JWT.
-4. Escribir la fila al finalizar la request.
+4. Encolar la fila al finalizar la request.
+
+La escritura es **no bloqueante** por defecto: una cola acotada en memoria
+(`AUDIT_QUEUE_MAXSIZE`) alimenta un pool de workers
+(`AUDIT_WORKER_CONCURRENCY`) que agrupa eventos en lotes
+(`AUDIT_BATCH_SIZE`) para hacer un commit por lote. Persisten fuera del camino
+de respuesta, reintentan con backoff (`AUDIT_WRITE_RETRIES`,
+`AUDIT_RETRY_BACKOFF_MS`) y se drenan al apagar la aplicación. Si el lote falla
+tras los reintentos, se reintenta fila por fila para no perder eventos válidos.
+Si la cola se llena, se descarta el evento con un log de error: la API nunca se
+bloquea ni crece sin límite. `AUDIT_SYNC_WRITES=true` solo se usa en pruebas.
+
+En un error no controlado se guarda únicamente el tipo de excepción y el
+`request_id`; nunca `str(exc)`, que podría contener SQL, rutas o datos internos.
 
 Se auditan:
 
 - Todas las mutaciones (`POST`, `PUT`, `PATCH`, `DELETE`).
 - Login (`/api/user/auth/...`).
 - Cualquier respuesta `>= 400`.
-- `GET` exitosos solo si `AUDIT_HTTP_ALL=true`.
-- Las lecturas exitosas de `/api/audit` no se duplican: el acceso queda
-  registrado por el evento de navegación (`page_view`). Los intentos fallidos
-  de leer la auditoría sí se registran.
+- Lecturas sensibles exactas con éxito: `/api/audit`, `/api/audit/users` y
+  `/api/user` (listado). No se auditan subrutas como `/api/user/me`; tampoco
+  generan consultas adicionales.
+- `GET` exitosos restantes solo si `AUDIT_HTTP_ALL=true`.
 
 No se auditan `/health`, `/docs`, `/redoc` ni `/openapi.json`.
 
@@ -79,11 +92,14 @@ No se auditan `/health`, `/docs`, `/redoc` ni `/openapi.json`.
 
 El frontend registra una fila por cambio de ruta en `/dashboard/...` con
 `POST /api/audit/pageview` (`entity=Navigation`, `action=page_view`, método
-`GET`). El endpoint escribe su propio evento; por eso el middleware no duplica
-el `POST` exitoso. El usuario, la IP y el user-agent se derivan del JWT y de la
-request; el cliente no elige el usuario. Tiene rate limit propio
-(`PAGEVIEW_RATE_LIMIT`). Los intentos anónimos (`401`) se registran igual por el
-middleware HTTP, incluidos los `404` de reconocimiento.
+`GET`). **La ruta es declarada por el cliente**: el evento se marca con
+`after_data.source = "client"` y sirve como rastro de navegación, no como
+prueba de una lectura verificada en el servidor. El endpoint escribe su propio
+evento; por eso el middleware no duplica el `POST` exitoso. El usuario, la IP y
+el user-agent se derivan del JWT y de la request; el cliente no elige el
+usuario. Tiene rate limit propio (`PAGEVIEW_RATE_LIMIT`). Los intentos anónimos
+(`401`) se registran igual por el middleware HTTP, incluidos los `404` de
+reconocimiento.
 
 Las mutaciones de negocio (proyectos, inventario, equipos, gastos, prorrateo,
 reportes) se auditan en el backend con `record_audit`, no desde el navegador.
@@ -93,6 +109,12 @@ reportes) se auditan en el backend con `record_audit`, no desde el navegador.
 | Variable | Default | Uso |
 |---|---|---|
 | `AUDIT_HTTP_ALL` | `false` | Auditar también todos los GET exitosos |
+| `AUDIT_SYNC_WRITES` | `false` | Escritura síncrona (solo pruebas) |
+| `AUDIT_QUEUE_MAXSIZE` | `10000` | Capacidad de la cola en memoria |
+| `AUDIT_WORKER_CONCURRENCY` | `2` | Workers de persistencia |
+| `AUDIT_BATCH_SIZE` | `50` | Eventos por commit del worker |
+| `AUDIT_WRITE_RETRIES` | `2` | Reintentos de persistencia |
+| `AUDIT_RETRY_BACKOFF_MS` | `200` | Backoff base entre reintentos |
 | `TRUST_PROXY_HEADERS` | `false` | Confiar en `X-Forwarded-For` / `X-Real-IP` |
 
 `TRUST_PROXY_HEADERS` solo debe activarse si la API está detrás de un proxy
