@@ -23,9 +23,11 @@ from decimal import Decimal
 
 from fastapi import HTTPException, Request, status
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, joinedload
 
+from src.model.user import RolModel, UserModel
 from src.model.project import (
     AudithProjectModel,
     PriorityProjectModel,
@@ -33,6 +35,8 @@ from src.model.project import (
     StatusProjectModel,
 )
 from src.schema.project import (
+    CoordinatorOut,
+    ProjectCreate,
     PaginatedPriorityLog,
     PaginatedProjects,
     PriorityChangeIn,
@@ -642,3 +646,211 @@ async def list_priority_log(
     return PaginatedPriorityLog(
         items=items, total=total, limit=limit, offset=offset
     )
+
+
+# ---------------------------------------------------------------------------
+# Alta de proyectos
+# ---------------------------------------------------------------------------
+
+PRIORITY_DEFAULT = "media"
+INITIAL_PRIORITY_NOTE = "Prioridad inicial asignada al registrar el proyecto."
+_CODE_ATTEMPTS = 5
+
+
+def can_create_project(role: str | None) -> bool:
+    """Administrador y coordinador registran proyectos; aprobador no."""
+    return role in (ADMIN_ROLE, COORDINATOR_ROLE)
+
+
+def build_unique_code(area: str, year: int, sequence: int) -> str:
+    """``QUI``, 2026, 7 -> ``QUI-2026-007``."""
+    return f"{area.upper()}-{year}-{sequence:03d}"
+
+
+def next_sequence(existing_codes: list[str], prefix: str) -> int:
+    """Siguiente correlativo para ``prefix`` (``QUI-2026-``) segun los codigos actuales."""
+    highest = 0
+    for code in existing_codes:
+        tail = code[len(prefix):] if code.startswith(prefix) else ""
+        if tail.isdigit():
+            highest = max(highest, int(tail))
+    return highest + 1
+
+
+async def list_coordinators(db: AsyncSession) -> list[CoordinatorOut]:
+    """Coordinadores activos, para elegir el responsable al crear un proyecto."""
+    result = await db.execute(
+        select(UserModel)
+        .join(RolModel, UserModel.id_rol == RolModel.id)
+        .where(RolModel.name == COORDINATOR_ROLE, UserModel.is_active.is_(True))
+        .order_by(UserModel.name.asc().nulls_last(), UserModel.email.asc())
+    )
+    return [
+        CoordinatorOut(id=user.id, full_name=_full_name(user), email=user.email)
+        for user in result.scalars().all()
+    ]
+
+
+async def _resolve_coordinator(
+    db: AsyncSession, payload: ProjectCreate, actor: CurrentUser
+) -> UserModel:
+    if actor.rol == COORDINATOR_ROLE:
+        # Un coordinador no puede registrar proyectos a nombre de otro.
+        if payload.id_user is not None and payload.id_user != actor.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No autorizado",
+            )
+        target_id = actor.id
+    else:
+        if payload.id_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Elige el coordinador responsable",
+            )
+        target_id = payload.id_user
+
+    result = await db.execute(
+        select(UserModel)
+        .options(joinedload(UserModel.rol))
+        .where(UserModel.id == target_id)
+    )
+    user = result.scalar_one_or_none()
+    if (
+        user is None
+        or not bool(user.is_active)
+        or user.rol is None
+        or user.rol.name != COORDINATOR_ROLE
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="El responsable debe ser un coordinador activo",
+        )
+    return user
+
+
+async def _initial_catalogs(
+    db: AsyncSession,
+) -> tuple[StatusProjectModel, PriorityProjectModel]:
+    statuses = (await db.execute(select(StatusProjectModel))).scalars().all()
+    initial_status = next(
+        (s for s in statuses if canonical_status_name(s.name) == STATUS_PROPOSAL),
+        None,
+    )
+    priorities = (
+        await db.execute(select(PriorityProjectModel).order_by(PriorityProjectModel.id))
+    ).scalars().all()
+    initial_priority = next(
+        (p for p in priorities if _fold(p.name) == PRIORITY_DEFAULT),
+        priorities[-1] if priorities else None,
+    )
+    if initial_status is None or initial_priority is None:
+        logger.error("Faltan catalogos de proyecto (Propuesta / prioridades)")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error",
+        )
+    return initial_status, initial_priority
+
+
+async def create_project(
+    db: AsyncSession,
+    payload: ProjectCreate,
+    actor: CurrentUser,
+    request: Request | None = None,
+) -> ProjectOut:
+    """Registra un proyecto en ``Propuesta`` con codigo correlativo por area y año."""
+    if not can_create_project(actor.rol):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No autorizado",
+        )
+
+    area = payload.area_code.upper()
+    year = datetime.now(timezone.utc).year
+    prefix = f"{area}-{year}-"
+    description = payload.description or None
+
+    for attempt in range(_CODE_ATTEMPTS):
+        coordinator = await _resolve_coordinator(db, payload, actor)
+        initial_status, initial_priority = await _initial_catalogs(db)
+
+        existing = (
+            await db.execute(
+                select(ProjectModel.unique_code).where(
+                    ProjectModel.unique_code.like(f"{prefix}%")
+                )
+            )
+        ).scalars().all()
+        unique_code = build_unique_code(area, year, next_sequence(list(existing), prefix))
+
+        project = ProjectModel(
+            unique_code=unique_code,
+            name=payload.name,
+            description=description,
+            id_status=initial_status.id,
+            id_priority=initial_priority.id,
+            progress=Decimal("0"),
+            budget_execution=Decimal("0"),
+            id_user=coordinator.id,
+        )
+        project.status = initial_status
+        project.priority = initial_priority
+        project.user = coordinator
+        db.add(project)
+
+        try:
+            await db.flush()
+            # Primera fila del historial: deja trazada la prioridad inicial.
+            db.add(
+                AudithProjectModel(
+                    id_project=project.id,
+                    unique_code=project.unique_code,
+                    id_status=project.id_status,
+                    id_priority=project.id_priority,
+                    id_user=actor.id,
+                    explaining=INITIAL_PRIORITY_NOTE,
+                )
+            )
+            await record_audit(
+                db,
+                entity="Project",
+                action="create_project",
+                entity_id=project.id,
+                user_id=actor.id,
+                request=request,
+                status_code=status.HTTP_201_CREATED,
+                after=project_snapshot(project),
+            )
+            await db.commit()
+            break
+        except IntegrityError as exc:
+            # Dos altas simultaneas en la misma area pueden tomar el mismo
+            # correlativo: el UNIQUE de unique_code decide y se reintenta.
+            await db.rollback()
+            if "unique_code" in str(getattr(exc, "orig", exc)).lower() and attempt < _CODE_ATTEMPTS - 1:
+                continue
+            logger.error("Error de integridad creando proyecto (%s)", type(exc).__name__)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="No se pudo generar un código único. Inténtalo de nuevo",
+            ) from exc
+        except HTTPException:
+            await db.rollback()
+            raise
+        except Exception as exc:  # pragma: no cover - depende de la BD
+            await db.rollback()
+            logger.error("Error creando proyecto (%s)", type(exc).__name__)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error",
+            ) from exc
+
+    # Relee con fechas del servidor y relaciones cargadas.
+    result = await db.execute(
+        _project_query()
+        .where(ProjectModel.id == project.id)
+        .execution_options(populate_existing=True)
+    )
+    return _project_out(result.scalar_one())
+

@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.db import get_db
 from src.schema.project import (
+    CoordinatorOut,
+    ProjectCreate,
     PaginatedPriorityLog,
     PaginatedProjects,
     PriorityChangeIn,
@@ -37,6 +39,30 @@ async def get_project_catalogs(
 ):
     """Estados y prioridades reales para editar/priorizar sin IDs fijos."""
     return await project_service.list_catalogs(db)
+
+
+@router_projects.get("/coordinators", response_model=list[CoordinatorOut])
+async def get_project_coordinators(
+    _: CurrentUser = Depends(require_roles(ADMIN_ROLE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Coordinadores activos para asignar como responsables (solo admin)."""
+    return await project_service.list_coordinators(db)
+
+
+@router_projects.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
+async def create_project(
+    payload: ProjectCreate,
+    request: Request,
+    current_user: CurrentUser = Depends(
+        require_roles(ADMIN_ROLE, COORDINATOR_ROLE)
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """Administrador elige el coordinador; el coordinador queda como responsable."""
+    return await project_service.create_project(
+        db, payload, current_user, request=request
+    )
 
 
 @router_projects.get("/priority-log", response_model=PaginatedPriorityLog)

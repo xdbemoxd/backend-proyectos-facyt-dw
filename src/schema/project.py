@@ -137,4 +137,29 @@ class PaginatedPriorityLog(BaseModel):
     offset: int
 
 
+class ProjectCreate(BaseModel):
+    """POST /api/projects.
+
+    - ``area_code``: siglas del area (2 a 6 letras, p. ej. ``QUI``). El backend
+      arma el codigo unico ``{AREA}-{AÑO}-{NNN}``; el cliente nunca lo envia.
+    - ``id_user``: coordinador responsable. Obligatorio para el administrador;
+      un coordinador siempre queda como responsable de lo que crea.
+    - Estatus inicial ``Propuesta`` y prioridad inicial ``Media``: la prioridad
+      solo cambia luego por el endpoint auditado (RN-3).
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    area_code: str = Field(min_length=2, max_length=6, pattern=r"^[A-Za-z]{2,6}$")
+    name: str = Field(min_length=3, max_length=150)
+    description: str | None = Field(default=None, max_length=255)
+    id_user: UUID | None = None
+
+
+class CoordinatorOut(BaseModel):
+    """Coordinador activo que puede ser responsable de un proyecto."""
+
+    id: UUID
+    full_name: str
+    email: EmailStr
 
